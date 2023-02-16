@@ -4,7 +4,6 @@
 pragma solidity 0.6.10;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { IERC20Metadata } from "./IERC20Metadata.sol";
 
 /**
  * @dev Interface of the ERC4626 "Tokenized Vault Standard", as defined in
@@ -12,7 +11,7 @@ import { IERC20Metadata } from "./IERC20Metadata.sol";
  *
  * _Available since v4.7._
  */
-interface IERC4626 is IERC20, IERC20Metadata {
+interface IERC4626 is IERC20 {
     event Deposit(address indexed sender, address indexed owner, uint256 assets, uint256 shares);
 
     event Withdraw(
@@ -22,6 +21,21 @@ interface IERC4626 is IERC20, IERC20Metadata {
         uint256 assets,
         uint256 shares
     );
+
+    /**
+     * @dev Returns the name of the token.
+     */
+    function name() external view returns (string memory);
+
+    /**
+     * @dev Returns the symbol of the token.
+     */
+    function symbol() external view returns (string memory);
+
+    /**
+     * @dev Returns the decimals places of the token.
+     */
+    function decimals() external view returns (uint8);
 
     /**
      * @dev Returns the address of the underlying token used for the Vault for accounting, depositing, and withdrawing.
