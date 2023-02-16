@@ -158,7 +158,6 @@ describe("ERC4626WrapV2Module", () => {
         );
 
         await underlyingToken.approve(wrappedToken.address, MAX_UINT_256);
-        await wrappedToken.deposit(ether(0.5), setToken.address);
       });
 
       async function subject(): Promise<any> {

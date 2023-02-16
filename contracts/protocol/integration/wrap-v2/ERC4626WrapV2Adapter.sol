@@ -56,7 +56,7 @@ contract ERC4626WrapV2Adapter {
         require(vault.asset() == _underlyingToken, "Must be a valid token pair");
 
         bytes memory callData = abi.encodeWithSignature(
-            "deposit(uint256, address)",
+            "deposit(uint256,address)",
             _underlyingUnits,
             _to
         );
@@ -91,7 +91,7 @@ contract ERC4626WrapV2Adapter {
         require(vault.asset() == _underlyingToken, "Must be a valid token pair");
 
         bytes memory callData = abi.encodeWithSignature(
-            "withdraw(uint256, address, address)",
+            "withdraw(uint256,address,address)",
             _wrappedTokenUnits,
             _to,
             _to
@@ -105,7 +105,7 @@ contract ERC4626WrapV2Adapter {
      *
      * @return address        Address of the contract to approve tokens to
      */
-    function getSpenderAddress(address /* _underlyingToken */, address  _wrappedToken) external view returns(address) {
+    function getSpenderAddress(address /* _underlyingToken */, address  _wrappedToken) external pure returns(address) {
         return _wrappedToken;
     }
 }

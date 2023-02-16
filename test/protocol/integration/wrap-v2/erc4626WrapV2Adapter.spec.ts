@@ -93,8 +93,8 @@ describe("ERC4626WrapV2Adapter", () => {
 
     describe("when invalid wrapped token / underlying token pair", () => {
       beforeEach(async () => {
-        subjectUnderlyingToken = underlyingToken.address;
-        subjectWrappedToken = setV2Setup.dai.address;
+        subjectUnderlyingToken = setV2Setup.usdc.address;
+        subjectWrappedToken = wrappedToken.address;
       });
 
       it("should revert", async () => {
@@ -137,7 +137,7 @@ describe("ERC4626WrapV2Adapter", () => {
 
     describe("when invalid wrapped token / underlying token pair", () => {
       beforeEach(async () => {
-        subjectUnderlyingToken = setV2Setup.dai.address;
+        subjectUnderlyingToken = setV2Setup.usdc.address;
         subjectWrappedToken = wrappedToken.address;
       });
 
