@@ -43,8 +43,8 @@ describe("ERC4626WrapV2Module", () => {
     setV2Setup = getSystemFixture(owner.address);
     await setV2Setup.initialize();
 
-    underlyingToken = setV2Setup.usdc;
-    wrappedToken = await deployer.mocks.deployERC4626Mock("maUSDC", "maUSDC", setV2Setup.usdc.address);
+    underlyingToken = setV2Setup.dai;
+    wrappedToken = await deployer.mocks.deployERC4626Mock("maDAI", "maDAI", setV2Setup.dai.address);
 
     // WrapModule setup
     wrapModule = await deployer.modules.deployWrapModuleV2(setV2Setup.controller.address, setV2Setup.weth.address);
@@ -63,7 +63,7 @@ describe("ERC4626WrapV2Module", () => {
 
     before(async () => {
       setToken = await setV2Setup.createSetToken(
-        [setV2Setup.usdc.address],
+        [setV2Setup.dai.address],
         [ether(1)],
         [setV2Setup.issuanceModule.address, wrapModule.address]
       );
@@ -73,9 +73,9 @@ describe("ERC4626WrapV2Module", () => {
       await wrapModule.initialize(setToken.address);
 
       // Issue some Sets
-      setTokensIssued = ether(10);
+      setTokensIssued = ether(1);
       const underlyingRequired = setTokensIssued;
-      await setV2Setup.usdc.approve(setV2Setup.issuanceModule.address, underlyingRequired);
+      await setV2Setup.dai.approve(setV2Setup.issuanceModule.address, underlyingRequired);
       await setV2Setup.issuanceModule.issue(setToken.address, setTokensIssued, owner.address);
     });
 

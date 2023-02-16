@@ -39,8 +39,8 @@ describe("ERC4626WrapV2Adapter", () => {
 
     await setV2Setup.initialize();
 
-    underlyingToken = setV2Setup.usdc;
-    wrappedToken = await deployer.mocks.deployERC4626Mock("maUSDC", "maUSDC", setV2Setup.usdc.address);
+    underlyingToken = setV2Setup.dai;
+    wrappedToken = await deployer.mocks.deployERC4626Mock("maDAI", "maDAI", setV2Setup.dai.address);
 
     wrapAdapter = await deployer.adapters.deployERC4626WrapV2Adapter();
   });

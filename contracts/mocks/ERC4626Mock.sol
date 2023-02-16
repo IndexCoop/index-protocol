@@ -19,9 +19,9 @@
 pragma solidity 0.6.10;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-// mock class using BasicToken
 contract ERC4626Mock is ERC20 {
     address public underlying_asset;
 
@@ -41,16 +41,16 @@ contract ERC4626Mock is ERC20 {
     }
 
     function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
-        uint256 shares = assets;
+        shares = assets;
         
-        IERC20(underlying_asset).transferFrom(receiver, address(this), assets);
+        SafeERC20.safeTransferFrom(IERC20(underlying_asset), receiver, address(this), assets);
         _mint(receiver, shares);
     }
 
     function withdraw(uint256 assets, address receiver, address owner) external returns (uint256 shares) {
-        uint256 shares = assets;
+        shares = assets;
 
         _burn(receiver, shares);
-        IERC20(underlying_asset).transfer(receiver, assets);
+        SafeERC20.safeTransfer(IERC20(underlying_asset), receiver, assets);
     }
 }
