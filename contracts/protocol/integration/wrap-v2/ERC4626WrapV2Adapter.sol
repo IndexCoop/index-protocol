@@ -102,8 +102,10 @@ contract ERC4626WrapV2Adapter {
 
     /**
      * Returns the address to approve source tokens for wrapping.
+     * 
+     * @param _wrappedToken    Address of the ERC-4626 vault
      *
-     * @return address        Address of the contract to approve tokens to
+     * @return address         Address of the contract to approve tokens to
      */
     function getSpenderAddress(address /* _underlyingToken */, address  _wrappedToken) external pure returns(address) {
         return _wrappedToken;
