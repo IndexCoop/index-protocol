@@ -54,9 +54,9 @@ contract ERC4626WrapV2Adapter {
         IERC4626 vault = IERC4626(_wrappedToken);
         require(vault.asset() == _underlyingToken, "Must be a valid token pair");
 
-        bytes memory callData = abi.encodeWithSignature(
-            "deposit(uint256,address)",
-            _underlyingUnits,
+        bytes memory callData = abi.encodeWithSelector(
+            IERC4626.deposit.selector, 
+            _underlyingUnits, 
             _to
         );
 
@@ -89,8 +89,8 @@ contract ERC4626WrapV2Adapter {
         IERC4626 vault = IERC4626(_wrappedToken);
         require(vault.asset() == _underlyingToken, "Must be a valid token pair");
 
-        bytes memory callData = abi.encodeWithSignature(
-            "withdraw(uint256,address,address)",
+        bytes memory callData = abi.encodeWithSelector(
+            IERC4626.withdraw.selector, 
             _wrappedTokenUnits,
             _to,
             _to
