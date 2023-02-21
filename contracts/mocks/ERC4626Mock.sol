@@ -46,10 +46,10 @@ contract ERC4626Mock is ERC20 {
         SafeERC20.safeTransferFrom(IERC20(underlying_asset), receiver, address(this), assets);
         _mint(receiver, shares);
     }
-
-    function withdraw(uint256 assets, address receiver, address owner) external returns (uint256 shares) {
-        shares = assets;
-
+    
+    function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
+        assets = shares;
+        
         _burn(receiver, shares);
         SafeERC20.safeTransfer(IERC20(underlying_asset), receiver, assets);
     }
