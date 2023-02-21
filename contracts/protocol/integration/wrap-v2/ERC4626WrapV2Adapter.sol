@@ -90,7 +90,7 @@ contract ERC4626WrapV2Adapter {
         require(vault.asset() == _underlyingToken, "Must be a valid token pair");
 
         bytes memory callData = abi.encodeWithSelector(
-            IERC4626.withdraw.selector, 
+            IERC4626.redeem.selector, 
             _wrappedTokenUnits,
             _to,
             _to
