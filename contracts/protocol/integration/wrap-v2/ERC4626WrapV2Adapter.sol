@@ -20,7 +20,7 @@ import { IERC4626 } from "../../../interfaces/external/IERC4626.sol";
 
 /**
  * @title ERC4626WrapV2Adapter
- * @author pblivin0x
+ * @author Index Cooperative
  *
  * Wrap adapter for ERC-4626 Vaults that returns data for wraps/unwraps of tokens
  */
