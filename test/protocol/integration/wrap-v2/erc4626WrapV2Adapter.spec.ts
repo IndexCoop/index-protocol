@@ -126,7 +126,7 @@ describe("ERC4626WrapV2Adapter", () => {
       const [targetAddress, ethValue, callData] = await subject();
 
       const expectedCallData = wrappedToken.interface.encodeFunctionData(
-        "withdraw",
+        "redeem",
         [subjectWrappedTokenUnits, subjectTo, subjectTo]
       );
 

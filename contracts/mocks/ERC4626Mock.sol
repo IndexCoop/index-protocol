@@ -50,7 +50,7 @@ contract ERC4626Mock is ERC20 {
     function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
         assets = shares;
         
-        _burn(receiver, shares);
+        _burn(owner, shares);
         SafeERC20.safeTransfer(IERC20(underlying_asset), receiver, assets);
     }
 }
