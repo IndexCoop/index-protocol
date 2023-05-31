@@ -4,7 +4,10 @@ import {
   AaveGovernanceV2Adapter,
   AaveV2WrapV2Adapter,
   BalancerV1IndexExchangeAdapter,
+  BoundedStepwiseExponentialPriceAdapter,
+  BoundedStepwiseLinearPriceAdapter,
   CompoundLikeGovernanceAdapter,
+  ConstantPriceAdapter,
   CurveExchangeAdapter,
   CurveStakingAdapter,
   CurveStEthExchangeAdapter,
@@ -35,7 +38,10 @@ import { Address, Bytes } from "./../types";
 import { AaveGovernanceV2Adapter__factory } from "../../typechain/factories/AaveGovernanceV2Adapter__factory";
 import { AaveV2WrapV2Adapter__factory } from "../../typechain/factories/AaveV2WrapV2Adapter__factory";
 import { BalancerV1IndexExchangeAdapter__factory } from "../../typechain/factories/BalancerV1IndexExchangeAdapter__factory";
+import { BoundedStepwiseExponentialPriceAdapter__factory } from "../../typechain/factories/BoundedStepwiseExponentialPriceAdapter__factory";
+import { BoundedStepwiseLinearPriceAdapter__factory } from "../../typechain/factories/BoundedStepwiseLinearPriceAdapter__factory";
 import { CompoundLikeGovernanceAdapter__factory } from "../../typechain/factories/CompoundLikeGovernanceAdapter__factory";
+import { ConstantPriceAdapter__factory } from "../../typechain/factories/ConstantPriceAdapter__factory";
 import { CurveExchangeAdapter__factory } from "../../typechain/factories/CurveExchangeAdapter__factory";
 import { CurveStakingAdapter__factory } from "../../typechain/factories/CurveStakingAdapter__factory";
 import { CurveStEthExchangeAdapter__factory } from "../../typechain/factories/CurveStEthExchangeAdapter__factory";
@@ -299,5 +305,17 @@ export default class DeployAdapters {
       steth,
       exchange,
     );
+  }
+
+  public async deployConstantPriceAdapter(): Promise<ConstantPriceAdapter> {
+    return await new ConstantPriceAdapter__factory(this._deployerSigner).deploy();
+  }
+
+  public async deployBoundedStepwiseLinearPriceAdapter(): Promise<BoundedStepwiseLinearPriceAdapter> {
+    return await new BoundedStepwiseLinearPriceAdapter__factory(this._deployerSigner).deploy();
+  }
+
+  public async deployBoundedStepwiseExponentialPriceAdapter(): Promise<BoundedStepwiseExponentialPriceAdapter> {
+    return await new BoundedStepwiseExponentialPriceAdapter__factory(this._deployerSigner).deploy();
   }
 }
