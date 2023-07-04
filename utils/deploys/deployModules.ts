@@ -268,7 +268,7 @@ export default class DeployModules {
     ).deploy(controller, perpVault, perpQuoter, perpMarketRegistry, maxPerpPositionsPerSet);
   }
 
-  public async deployAuctionRebalanceModuleV1(controller: Address, weth: Address): Promise<AuctionRebalanceModuleV1> {
-    return await new AuctionRebalanceModuleV1__factory(this._deployerSigner).deploy(controller, weth);
+  public async deployAuctionRebalanceModuleV1(controller: Address): Promise<AuctionRebalanceModuleV1> {
+    return await new AuctionRebalanceModuleV1__factory(this._deployerSigner).deploy(controller);
   }
 }

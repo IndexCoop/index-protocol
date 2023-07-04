@@ -30,21 +30,21 @@ import { IAuctionPriceAdapterV1 } from "../../../interfaces/IAuctionPriceAdapter
 import { IController } from "../../../interfaces/IController.sol";
 import { Invoke } from "../../lib/Invoke.sol";
 import { ISetToken } from "../../../interfaces/ISetToken.sol";
-import { IWETH } from "../../../interfaces/external/IWETH.sol";
 import { ModuleBase } from "../../lib/ModuleBase.sol";
 import { Position } from "../../lib/Position.sol";
 import { PreciseUnitMath } from "../../../lib/PreciseUnitMath.sol";
 
 /**
  * @title AuctionRebalanceModuleV1
- * @author Index Coop / Set Protocol
- * @notice Smart contract that facilitates rebalances for indices via single asset auctions for an intermediate asset 
- * (WETH). Index managers input the target allocation of each component in precise units (10 ** 18), the individual
- * component auction parameters, and the duration of the rebalance to startRebalance(). Once the rebalance is started
- * allowed bidders can call bid() to bid on the component auctions. If excess WETH is left over after all component
- * targets are met, the manager can call raiseAssetTargets() to raise all component targets by a specified percentage.
- * @dev Security assumption: works with StreamingFeeModule and BasicIssuanceModule (any other module additions to Sets
- * using this module need to be examined separately)
+ * @author Index Coop
+ * @notice Facilitates rebalances for index sets via single-asset auctions. Managers initiate
+ * rebalances specifying target allocations in precise units (scaled by 10^18), quote asset
+ * (e.g., WETH, USDC), auction parameters per component, and rebalance duration through
+ * startRebalance(). Bidders can participate via bid() for individual components. Excess
+ * quote asset can be managed by proportionally increasing the targets using raiseAssetTargets().
+ *
+ * @dev Compatible with StreamingFeeModule and BasicIssuanceModule. Review compatibility if used
+ * with additional modules.
  */
 contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
     using SafeCast for int256;
@@ -57,141 +57,155 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
     using AddressArrayUtils for address[];
     using AddressArrayUtils for IERC20[];
 
-    /* ============ Struct ============ */
+    /* ============ Structs ============ */
 
     struct AuctionExecutionParams {
-        uint256 targetUnit;                       // Target unit of component for Set
-        string priceAdapterName;                  // Name of price adapter
-        bytes priceAdapterData;                   // Arbitrary data that can be used to encode price adapter specific settings
+        uint256 targetUnit;                      // Target quantity of the component in Set, in precise units (10 ** 18).
+        string priceAdapterName;                 // Identifier for the price adapter to be used.
+        bytes priceAdapterConfigData;            // Encoded data for configuring the chosen price adapter.
     }
 
     struct BidPermissionInfo {
-        bool anyoneBid;                           // Boolean indicating if anyone can execute a bid
-        address[] biddersHistory;                 // Tracks permissioned bidders to be deleted on module removal
-        mapping(address => bool) bidAllowList;    // Mapping indicating which addresses are allowed to execute a bid
+        bool isAnyoneAllowedToBid;               // Flag indicating if bids are open to anyone (true) or restricted (false).
+        address[] biddersHistory;                // List of addresses that have been permissioned to bid.
+        mapping(address => bool) bidAllowList;   // Mapping of addresses to a boolean indicating if they are allowed to bid.
     }
 
     struct RebalanceInfo {
-        uint256 startTime;                        // Time that the rebalance began
-        uint256 duration;                         // Time in seconds from start to end of rebalance
-        uint256 positionMultiplier;               // Position multiplier at the beginning of rebalance
-        uint256 raiseTargetPercentage;            // Amount to raise all unit targets by if allowed (in precise units)
-        address[] rebalanceComponents;            // Array of components involved in rebalance
+        IERC20 quoteAsset;                       // Reference to the ERC20 token used to quote auctions.
+        uint256 rebalanceStartTime;              // Unix timestamp marking the start of the rebalance.
+        uint256 rebalanceDuration;               // Duration of the rebalance in seconds.
+        uint256 positionMultiplier;              // Position multiplier when target units were calculated.
+        uint256 raiseTargetPercentage;           // Optional percentage to increase all target units if allowed, in precise units.
+        address[] rebalanceComponents;           // List of component tokens involved in the rebalance.
     }
 
     struct BidInfo {
-        ISetToken setToken;                       // Instance of SetToken
-        IERC20 component;                         // Instance of the component being bid on
-        IAuctionPriceAdapterV1 priceAdapter;      // Instance of PriceAdapter
-        bytes priceAdapterData;                   // Arbitrary data that can be used to encode price adapter specific settings
-        uint256 setTotalSupply;                   // Total supply of Set (in precise units)
-        bool isSendToken;                         // Boolean indicating if component is being sent away by SetToken in the bid
-        uint256 maxComponentQuantity;             // Quantity of component being auctioned off
-        address sendToken;                        // Address of token being sent away by SetToken in the bid
-        address receiveToken;                     // Address of token being received by SetToken in the bid
-        uint256 price;                            // Price quote from the PriceAdapter (in precise units)
-        uint256 sendQuantity;                     // Total quantity of token being sent away by SetToken in the bid
-        uint256 receiveQuantity;                  // Total quantity of token received by SetToken in the bid
-        uint256 preBidSendTokenBalance;           // Total initial balance of token being sent away by SetToken in the bid
-        uint256 preBidReceiveTokenBalance;        // Total initial balance of token received by SetToken in the bid
+        ISetToken setToken;                      // Instance of the SetToken contract that is being rebalanced.
+        IERC20 sendToken;                        // The ERC20 token being sent in this bid.
+        IERC20 receiveToken;                     // The ERC20 token being received in this bid.
+        IAuctionPriceAdapterV1 priceAdapter;     // Instance of the price adapter contract used for this bid.
+        bytes priceAdapterConfigData;            // Data for configuring the price adapter.
+        bool isSellAuction;                      // Indicates if this is a sell auction (true) or a buy auction (false).
+        uint256 auctionQuantity;                 // The quantity of the component being auctioned.
+        uint256 componentPrice;                  // The price of the component as quoted by the price adapter.
+        uint256 quantitySentBySet;               // Quantity of tokens sent by SetToken in this bid.
+        uint256 quantityReceivedBySet;           // Quantity of tokens received by SetToken in this bid.
+        uint256 preBidTokenSentBalance;          // Balance of tokens being sent by SetToken before the bid.
+        uint256 preBidTokenReceivedBalance;      // Balance of tokens being received by SetToken before the bid.
+        uint256 setTotalSupply;                  // Total supply of the SetToken at the time of the bid.
     }
 
     /* ============ Events ============ */
 
     /**
-     * @dev Emitted on setRaiseTargetPercentage()
-     * @param _setToken                 Instance of the SetToken being rebalanced
-     * @param _raiseTargetPercentage    Amount to raise all component's unit targets by (in precise units)
+     * @dev Emitted when the target percentage increase is modified via setRaiseTargetPercentage()
+     * @param setToken                   Reference to the SetToken undergoing rebalancing
+     * @param newRaiseTargetPercentage   Updated percentage for potential target unit increases, in precise units (10 ** 18)
      */
     event RaiseTargetPercentageUpdated(
-        ISetToken indexed _setToken, 
-        uint256 _raiseTargetPercentage
+        ISetToken indexed setToken, 
+        uint256 newRaiseTargetPercentage
     );
 
     /**
-     * @dev Emitted on raiseAssetTargets()
-     * @param _setToken              Instance of the SetToken being rebalanced
-     * @param _positionMultiplier    Updated reference positionMultiplier for the SetToken rebalance
+     * @dev Emitted upon calling raiseAssetTargets()
+     * @param setToken                Reference to the SetToken undergoing rebalancing
+     * @param newPositionMultiplier   Updated position multiplier for the SetToken rebalance
      */
     event AssetTargetsRaised(
-        ISetToken indexed _setToken, 
-        uint256 _positionMultiplier
+        ISetToken indexed setToken, 
+        uint256 newPositionMultiplier
     );
 
     /**
-     * @dev Emitted on setAnyoneBid()
-     * @param _setToken        Instance of the SetToken being rebalanced
-     * @param _status          Boolean indicating if anyone can bid
+     * @dev Emitted upon toggling the bid permission setting via setAnyoneBid()
+     * @param setToken               Reference to the SetToken undergoing rebalancing
+     * @param isAnyoneAllowedToBid   Flag indicating if bids are open to all (true) or restricted (false)
      */
     event AnyoneBidUpdated(
-        ISetToken indexed _setToken, 
-        bool _status
+        ISetToken indexed setToken, 
+        bool isAnyoneAllowedToBid
     );
 
     /**
-     * @dev Emitted on setBidderStatus()
-     * @param _setToken        Instance of the SetToken being rebalanced
-     * @param _bidder          Address of the bidder to toggle status
-     * @param _status          Boolean indicating if bidder can bid
+     * @dev Emitted when the bidding status of an address is changed via setBidderStatus()
+     * @param setToken          Reference to the SetToken undergoing rebalancing
+     * @param bidder            Address whose bidding permission status is toggled
+     * @param isBidderAllowed   Flag indicating if the address is allowed (true) or not allowed (false) to bid
      */
     event BidderStatusUpdated(
-        ISetToken indexed _setToken, 
-        address indexed _bidder, 
-        bool _status
+        ISetToken indexed setToken, 
+        address indexed bidder, 
+        bool isBidderAllowed
     );
 
     /**
-     * @dev Emitted on startRebalance()
-     * @param _setToken                  Instance of the SetToken being rebalanced
-     * @param _duration                  Time in seconds from start to end of rebalance
-     * @param _positionMultiplier        Position multiplier when target units were calculated, needed in order to 
-     *                                   adjust target units if fees accrued
-     * @param _rebalanceComponents       Array of components involved in rebalance
+     * @dev Emitted when a rebalance is initiated using the startRebalance() function.
+     * @param setToken                    Instance of the SetToken contract that is undergoing rebalancing.
+     * @param quoteAsset                  The ERC20 token that is used as a quote currency for the auctions.
+     * @param isSetTokenLocked            Indicates if the rebalance process locks the SetToken (true) or not (false).
+     * @param rebalanceDuration           Duration of the rebalance process in seconds.
+     * @param initialPositionMultiplier   Position multiplier when target units were calculated.
+     * @param componentsInvolved          Array of addresses of the component tokens involved in the rebalance.
+     * @param auctionParameters           Array of AuctionExecutionParams structs, containing auction parameters for each component token.
      */
     event RebalanceStarted(
-        ISetToken indexed _setToken,
-        uint256 _duration,
-        uint256 _positionMultiplier,
-        address[] _rebalanceComponents 
+        ISetToken indexed setToken,
+        IERC20 indexed quoteAsset,
+        bool isSetTokenLocked,
+        uint256 rebalanceDuration,
+        uint256 initialPositionMultiplier,
+        address[] componentsInvolved,
+        AuctionExecutionParams[] auctionParameters
     );
 
     /**
-     * @dev Emitted on bid()
-     * @param _setToken                     Instance of the SetToken to be rebalanced
-     * @param _component                    Instance of the component being bid on
-     * @param _bidder                       Address of the bidder
-     * @param _priceAdapter                 Address of the price adapter
-     * @param _isSendToken                  Boolean indicating if component is being sent away by SetToken in the bid
-     * @param _price                        Price quote from the PriceAdapter (in precise units)
-     * @param _netSendAmount                Total quantity of token being sent away by SetToken in the bid
-     * @param _netReceiveAmount             Total quantity of token received by SetToken in the bid
-     * @param _protocolFee                  Amount of receive token taken as protocol fee
-     * @param _setTotalSupply               Total supply of SetToken (in precise units)
+     * @dev Emitted upon execution of a bid via the bid() function.
+     * @param setToken                   Instance of the SetToken contract that is being rebalanced.
+     * @param sendToken                  The ERC20 token that is being sent by the bidder.
+     * @param receiveToken               The ERC20 token that is being received by the bidder.
+     * @param bidder                     The address of the bidder.
+     * @param priceAdapter               Instance of the price adapter contract used for this bid.
+     * @param isSellAuction              Indicates if this is a sell auction (true) or a buy auction (false).
+     * @param price                      The price of the component in precise units (10 ** 18).
+     * @param netQuantitySentBySet       The net amount of tokens sent by the SetToken in the bid.
+     * @param netQuantityReceivedBySet   The net amount of tokens received by the SetToken in the bid.
+     * @param protocolFee                The amount of the received token allocated as a protocol fee.
+     * @param setTotalSupply             The total supply of the SetToken at the time of the bid.
      */
     event BidExecuted(
-        ISetToken indexed _setToken,
-        address indexed _component,
-        address indexed _bidder,
-        IAuctionPriceAdapterV1 _priceAdapter,
-        bool _isSendToken,
-        uint256 _price,
-        uint256 _netSendAmount,
-        uint256 _netReceiveAmount,
-        uint256 _protocolFee,
-        uint256 _setTotalSupply
+        ISetToken indexed setToken,
+        address indexed sendToken,
+        address indexed receiveToken,
+        address bidder,
+        IAuctionPriceAdapterV1 priceAdapter,
+        bool isSellAuction,
+        uint256 price,
+        uint256 netQuantitySentBySet,
+        uint256 netQuantityReceivedBySet,
+        uint256 protocolFee,
+        uint256 setTotalSupply
+    );
+
+    /**
+     * @dev Emitted when a locked rebalance is concluded early via the unlock() function.
+     * @param setToken            Instance of the SetToken contract that is being rebalanced.
+     */
+    event LockedRebalanceEndedEarly(
+        ISetToken indexed setToken
     );
 
 
     /* ============ Constants ============ */
 
-    uint256 private constant AUCTION_REBALANCE_MODULE_PROTOCOL_FEE_INDEX = 0;               // Id of protocol fee % assigned to this module in the Controller
+    uint256 private constant AUCTION_MODULE_V1_PROTOCOL_FEE_INDEX = 0;   // Index of the protocol fee percentage assigned to this module in the Controller.
 
     /* ============ State Variables ============ */
 
-    mapping(ISetToken => mapping(IERC20 => AuctionExecutionParams)) public executionInfo;   // Mapping of SetToken to execution parameters of each asset on SetToken
-    mapping(ISetToken => BidPermissionInfo) public permissionInfo;                          // Mapping of SetToken to bid permissions
-    mapping(ISetToken => RebalanceInfo) public rebalanceInfo;                               // Mapping of SetToken to relevant data for latest rebalance
-    IWETH public immutable weth;                                                            // Instance of WETH
+    mapping(ISetToken => mapping(IERC20 => AuctionExecutionParams)) public executionInfo;   // Maps SetToken to component tokens and their respective auction execution parameters.
+    mapping(ISetToken => BidPermissionInfo) public permissionInfo;                          // Maps SetToken to information regarding bid permissions during a rebalance.
+    mapping(ISetToken => RebalanceInfo) public rebalanceInfo;                               // Maps SetToken to data relevant to the most recent rebalance.
 
     /* ============ Modifiers ============ */
 
@@ -202,157 +216,199 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
 
     /* ============ Constructor ============ */
 
-    /**
-     * @dev Deploy AuctionModuleV1 with passed controller and WETH address.
-     * 
-     * @param _controller           Instance of the Controller
-     * @param _weth                 Instance of WETH
-     */
-    constructor(
-        IController _controller, 
-        IWETH _weth
-    ) 
-        public 
-        ModuleBase(_controller) 
-    {
-        weth = _weth;
-    }
+    constructor(IController _controller) public ModuleBase(_controller) {}
 
     /* ============ External Functions ============ */
 
     /**
-     * @dev MANAGER ONLY: Changes the target allocation of the Set, opening up auctions for filling by the Sets designated bidders. The manager
-     * must pass in any new components and their target units (units defined by the amount of that component the manager wants in 10**18
-     * units of a SetToken). Old component target units must be passed in, in the current order of the components array on the
-     * SetToken. If a component is being removed it's index in the _oldComponentsTargetUnits should be set to 0. Additionally, the
-     * positionMultiplier is passed in, in order to adjust the target units in the event fees are accrued or some other activity occurs
-     * that changes the positionMultiplier of the Set. This guarantees the same relative allocation between all the components. If the target
-     * allocation is not reached within the duration, the rebalance closes with the allocation that was reached.
+     * @dev MANAGER ONLY: Initiates the rebalance process by setting target allocations for the SetToken. Opens auctions
+     * for filling by the Set's designated bidders. The function takes in new components to be added with their target units
+     * and existing components with updated target units (set to 0 if removing). A positionMultiplier is supplied to adjust
+     * target units, e.g., in cases where fee accrual affects the positionMultiplier of the SetToken, ensuring proportional
+     * allocation among components. If target allocations are not met within the specified duration, the rebalance concludes
+     * with the allocations achieved.
      *
-     * @param _setToken                         Instance of the SetToken to be rebalanced
-     * @param _newComponents                    Array of new components to add to allocation
-     * @param _newComponentsAuctionParams       Array of AuctionExecutionParams for new components, maps to same index of _newComponents array
-     * @param _oldComponentsAuctionParams       Array of AuctionExecutionParams for old component, maps to same index of
-     *                                               _setToken.getComponents() array, if component being removed set to 0.
-     * @param _duration                         Time in seconds from start to end of rebalance
-     * @param _positionMultiplier               Position multiplier when target units were calculated, needed in order to adjust target units
-     *                                               if fees accrued
+     * @param _setToken                     The SetToken to be rebalanced.
+     * @param _quoteAsset                   ERC20 token used as the quote asset in auctions.
+     * @param _newComponents                Addresses of new components to be added.
+     * @param _newComponentsAuctionParams   AuctionExecutionParams for new components, indexed corresponding to _newComponents.
+     * @param _oldComponentsAuctionParams   AuctionExecutionParams for existing components, indexed corresponding to
+     *                                      the current component positions. Set to 0 for components being removed.
+     * @param _shouldLockSetToken           Indicates if the rebalance should lock the SetToken.
+     * @param _rebalanceDuration            Duration of the rebalance in seconds.
+     * @param _initialPositionMultiplier    Position multiplier at the start of the rebalance.
      */
     function startRebalance(
         ISetToken _setToken,
+        IERC20 _quoteAsset,
         address[] calldata _newComponents,
         AuctionExecutionParams[] memory _newComponentsAuctionParams,
         AuctionExecutionParams[] memory _oldComponentsAuctionParams,
-        uint256 _duration,
-        uint256 _positionMultiplier
+        bool _shouldLockSetToken,
+        uint256 _rebalanceDuration,
+        uint256 _initialPositionMultiplier
     )
         external
         onlyManagerAndValidSet(_setToken)
     {
-        ( address[] memory aggregateComponents, AuctionExecutionParams[] memory aggregateAuctionParams ) = _getAggregateComponentsAndAuctionParams(
+        // Lock the SetToken if the _shouldLockSetToken flag is true and the SetToken is not already locked by this module
+        if (_shouldLockSetToken && _setToken.locker() != address(this)) {
+            _setToken.lock();
+        }
+
+        // Aggregate components and auction parameters
+        (address[] memory allComponents, AuctionExecutionParams[] memory allAuctionParams) = _aggregateComponentsAndAuctionParams(
             _setToken.getComponents(),
             _newComponents,
             _newComponentsAuctionParams,
             _oldComponentsAuctionParams
         );
 
-        for (uint256 i = 0; i < aggregateComponents.length; i++) {
-            require(!_setToken.hasExternalPosition(aggregateComponents[i]), "External positions not allowed");
-            executionInfo[_setToken][IERC20(aggregateComponents[i])] = aggregateAuctionParams[i];
+        // Set the execution information
+        for (uint256 i = 0; i < allComponents.length; i++) {
+            require(!_setToken.hasExternalPosition(allComponents[i]), "External positions not allowed");
+            executionInfo[_setToken][IERC20(allComponents[i])] = allAuctionParams[i];
         }
 
-        rebalanceInfo[_setToken].startTime = block.timestamp;
-        rebalanceInfo[_setToken].duration = _duration;
-        rebalanceInfo[_setToken].positionMultiplier = _positionMultiplier;
-        rebalanceInfo[_setToken].rebalanceComponents = aggregateComponents;
+        // Set the rebalance information
+        rebalanceInfo[_setToken].quoteAsset = _quoteAsset;
+        rebalanceInfo[_setToken].rebalanceStartTime = block.timestamp;
+        rebalanceInfo[_setToken].rebalanceDuration = _rebalanceDuration;
+        rebalanceInfo[_setToken].positionMultiplier = _initialPositionMultiplier;
+        rebalanceInfo[_setToken].rebalanceComponents = allComponents;
 
-        emit RebalanceStarted(_setToken, _duration, _positionMultiplier, aggregateComponents);
+        // Emit the RebalanceStarted event
+        emit RebalanceStarted(_setToken, _quoteAsset, _shouldLockSetToken, _rebalanceDuration, _initialPositionMultiplier, allComponents, allAuctionParams);
     }
 
-    /**
-     * @dev ACCESS LIMITED: Calling bid() pushes the current component units closer to the target units defined by the manager in startRebalance().
-     * Only approved addresses can call, if anyoneBid is false then contracts are allowed to call otherwise calling address must be EOA.
+   /**
+     * @dev ACCESS LIMITED: Only approved addresses can call this function unless isAnyoneAllowedToBid is enabled. This function
+     * is used to push the current component units closer to the target units defined in startRebalance().
+     *
+     * Bidders specify the amount of the component they intend to buy or sell, and also specify the maximum/minimum amount 
+     * of the quote asset they are willing to spend/receive.
+     *
+     * The auction parameters, which are set by the manager, are used to determine the price of the component. Any bids that 
+     * either don't move the component units towards the target, or overshoot the target, will be reverted.
+     *
+     * If protocol fees are enabled, they are collected in the token received in a bid.
      * 
-     * Bidder can pass in a max/min amount of ETH spent/received in the bid based on if the component is being bought/sold. The parameters defined
-     * by the manager are used to determine which exchange will be used and the size of the bid. Any bid size that does not push the component units
-     * past the target units will be reverted. Protocol fees, if enabled, are collected in the token received in a bid.
+     * SELL AUCTIONS:
+     * At the start of the rebalance, sell auctions are available to be filled in their full size.
      * 
-     * @param _setToken             Instance of the SetToken to be rebalanced
-     * @param _component            Instance of the component auction to bid on
-     * @param _componentQuantity    Amount of component in the bid
-     * @param _ethQuantityLimit     Max/min amount of ETH spent/received during bid
+     * BUY AUCTIONS:
+     * Buy auctions can be filled up to the amount of quote asset available in the SetToken. This means that if the SetToken 
+     * does not contain the quote asset as a component, buy auctions cannot be bid on until sell auctions have been executed 
+     * and there is quote asset available in the SetToken.
+     *
+     * @param _setToken          The SetToken to be rebalanced.
+     * @param _component         The component for which the auction is to be bid on.
+     * @param _componentAmount   The amount of component in the bid.
+     * @param _quoteAssetLimit   The maximum or minimum amount of quote asset that can be spent or received during the bid.
      */
     function bid(
         ISetToken _setToken,
         IERC20 _component,
-        uint256 _componentQuantity,
-        uint256 _ethQuantityLimit
+        uint256 _componentAmount,
+        uint256 _quoteAssetLimit
     )
         external
         nonReentrant
         onlyAllowedBidder(_setToken)
-        virtual
     {
+        // Validate whether the bid targets are legitimate
         _validateBidTargets(_setToken, _component);
 
-        BidInfo memory bidInfo = _createBidInfo(_setToken, _component, _componentQuantity, _ethQuantityLimit);
+        // Create the bid information structure
+        BidInfo memory bidInfo = _createBidInfo(_setToken, _component, _componentAmount, _quoteAssetLimit);
 
+        // Execute the token transfer specified in the bid information
         _executeBid(bidInfo);
 
-        uint256 protocolFee = _accrueProtocolFee(bidInfo);
+        // Accrue protocol fee and store the amount
+        uint256 protocolFeeAmount = _accrueProtocolFee(bidInfo);
 
-        (uint256 netSendAmount, uint256 netReceiveAmount) = _updatePositionState(bidInfo);
+        // Update the position state and store the net amounts
+        (uint256 netAmountSent, uint256 netAmountReceived) = _updatePositionState(bidInfo);
 
+        // Emit the BidExecuted event
         emit BidExecuted(
             bidInfo.setToken,
-            address(bidInfo.component),
+            address(bidInfo.sendToken),
+            address(bidInfo.receiveToken),
             msg.sender,
             bidInfo.priceAdapter,
-            bidInfo.isSendToken,
-            bidInfo.price,
-            netSendAmount,
-            netReceiveAmount,
-            protocolFee,
+            bidInfo.isSellAuction,
+            bidInfo.componentPrice,
+            netAmountSent,
+            netAmountReceived,
+            protocolFeeAmount,
             bidInfo.setTotalSupply
         );
-    } 
-
-    /**
-     * @dev ACCESS LIMITED: For situation where all target units met and remaining WETH, uniformly raise targets by same percentage by applying
-     * to logged positionMultiplier in RebalanceInfo struct, in order to allow further bidding. Can be called multiple times if necessary,
-     * targets are increased by amount specified by raiseAssetTargetsPercentage as set by manager. In order to reduce tracking error
-     * raising the target by a smaller amount allows greater granularity in finding an equilibrium between the excess ETH and components
-     * that need to be bought. Raising the targets too much could result in vastly under allocating to WETH as more WETH than necessary is
-     * spent buying the components to meet their new target.
-     *
-     * @param _setToken             Instance of the SetToken being rebalanced
-     */
-    function raiseAssetTargets(
-        ISetToken _setToken
-    ) 
-        external 
-        onlyAllowedBidder(_setToken) 
-        virtual 
-    {
-        require(
-            _allTargetsMet(_setToken)
-            && _getDefaultPositionRealUnit(_setToken, weth) > _getNormalizedTargetUnit(_setToken, weth),
-            "Targets not met or ETH =~ 0"
-        );
-
-        // positionMultiplier / (10^18 + raiseTargetPercentage)
-        // ex: (10 ** 18) / ((10 ** 18) + ether(.0025)) => 997506234413965087
-        rebalanceInfo[_setToken].positionMultiplier = rebalanceInfo[_setToken].positionMultiplier.preciseDiv(
-            PreciseUnitMath.preciseUnit().add(rebalanceInfo[_setToken].raiseTargetPercentage)
-        );
-        emit AssetTargetsRaised(_setToken, rebalanceInfo[_setToken].positionMultiplier);
     }
 
     /**
-     * @dev MANAGER ONLY: Set amount by which all component's targets units would be raised. Can be called at any time.
+     * @dev ACCESS LIMITED: Increases asset targets uniformly when all target units have been met but there is remaining quote asset.
+     * Can be called multiple times if necessary. Targets are increased by the percentage specified by raiseAssetTargetsPercentage set by the manager.
+     * This helps in reducing tracking error and providing greater granularity in reaching an equilibrium between the excess quote asset
+     * and the components to be purchased. However, excessively raising targets may result in under-allocating to the quote asset as more of
+     * it is spent buying components to meet the new targets.
      *
-     * @param _setToken                     Instance of the SetToken being rebalanced
-     * @param _raiseTargetPercentage        Amount to raise all component's unit targets by (in precise units)
+     * @param _setToken   The SetToken to be rebalanced.
+     */
+    function raiseAssetTargets(ISetToken _setToken)
+        external
+        onlyAllowedBidder(_setToken)
+        virtual
+    {
+        // Ensure the rebalance is in progress
+        require(!_isRebalanceDurationElapsed(_setToken), "Rebalance must be in progress");
+
+        // Ensure that all targets are met and there is excess quote asset
+        require(_canRaiseAssetTargets(_setToken), "Targets not met or quote asset =~ 0");
+
+        // Calculate the new positionMultiplier
+        uint256 newPositionMultiplier = rebalanceInfo[_setToken].positionMultiplier.preciseDiv(
+            PreciseUnitMath.preciseUnit().add(rebalanceInfo[_setToken].raiseTargetPercentage)
+        );
+
+        // Update the positionMultiplier in the RebalanceInfo struct
+        rebalanceInfo[_setToken].positionMultiplier = newPositionMultiplier;
+
+        // Emit the AssetTargetsRaised event
+        emit AssetTargetsRaised(_setToken, newPositionMultiplier);
+    }
+
+    /**
+     * @dev Unlocks the SetToken after rebalancing. Can be called once the rebalance duration has elapsed.
+     * Can only be called before the rebalance duration has elapsed if all targets are met, there is excess
+     * or at-target quote asset, and raiseTargetPercentage is zero.
+     *
+     * @param _setToken The SetToken to be unlocked.
+     */
+    function unlock(ISetToken _setToken) external {
+        bool isRebalanceDurationElapsed = _isRebalanceDurationElapsed(_setToken);
+        bool canUnlockEarly = _canUnlockEarly(_setToken);
+
+        // Ensure that either the rebalance duration has elapsed or the conditions for early unlock are met
+        require(isRebalanceDurationElapsed || canUnlockEarly, "Cannot unlock early unless all targets are met and raiseTargetPercentage is zero");
+
+        // If unlocking early, update the state
+        if (canUnlockEarly) {
+            delete rebalanceInfo[_setToken].rebalanceDuration;
+            emit LockedRebalanceEndedEarly(_setToken);
+        }
+
+        // Unlock the SetToken
+        _setToken.unlock();
+    }
+
+    /**
+     * @dev MANAGER ONLY: Sets the percentage by which the target units for all components can be increased.
+     * Can be called at any time by the manager.
+     *
+     * @param _setToken               The SetToken to be rebalanced.
+     * @param _raiseTargetPercentage  The percentage (in precise units) by which the target units can be increased.
      */
     function setRaiseTargetPercentage(
         ISetToken _setToken,
@@ -361,17 +417,23 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
         external
         onlyManagerAndValidSet(_setToken)
     {
-        require(_raiseTargetPercentage > 0, "Target percentage must be > 0");
+        // Ensure the raise target percentage is greater than 0
+        require(_raiseTargetPercentage > 0, "Target percentage must be greater than 0");
+
+        // Update the raise target percentage in the RebalanceInfo struct
         rebalanceInfo[_setToken].raiseTargetPercentage = _raiseTargetPercentage;
+
+        // Emit an event to log the updated raise target percentage
         emit RaiseTargetPercentageUpdated(_setToken, _raiseTargetPercentage);
     }
 
     /**
-     * @dev MANAGER ONLY: Toggles ability for passed addresses to call bid(). Can be called at any time.
+     * @dev MANAGER ONLY: Toggles the permission status of specified addresses to call the `bid()` function.
+     * The manager can call this function at any time.
      *
-     * @param _setToken        Instance of the SetToken being rebalanced
-     * @param _bidders         Array bidder addresses to toggle status
-     * @param _statuses        Booleans indicating if matching bidder can bid
+     * @param _setToken  The SetToken being rebalanced.
+     * @param _bidders   An array of addresses whose bidding permission status is to be toggled.
+     * @param _statuses  An array of booleans indicating the new bidding permission status for each corresponding address in `_bidders`.
      */
     function setBidderStatus(
         ISetToken _setToken,
@@ -381,39 +443,49 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
         external
         onlyManagerAndValidSet(_setToken)
     {
+        // Validate that the input arrays have the same length
         _bidders.validatePairsWithArray(_statuses);
 
+        // Iterate through the input arrays and update the permission status for each bidder
         for (uint256 i = 0; i < _bidders.length; i++) {
             _updateBiddersHistory(_setToken, _bidders[i], _statuses[i]);
             permissionInfo[_setToken].bidAllowList[_bidders[i]] = _statuses[i];
+
+            // Emit an event to log the updated permission status
             emit BidderStatusUpdated(_setToken, _bidders[i], _statuses[i]);
         }
     }
 
     /**
-     * @dev MANAGER ONLY: Toggle whether anyone can bid, if true bypasses the bidAllowList. Can be called at anytime.
+     * @dev MANAGER ONLY: Toggles whether or not anyone is allowed to call the `bid()` function.
+     * If set to true, it bypasses the bidAllowList, allowing any address to call the `bid()` function.
+     * The manager can call this function at any time.
      *
-     * @param _setToken         Instance of the SetToken
-     * @param _status           Boolean indicating if anyone can bid
+     * @param _setToken  The SetToken instance.
+     * @param _status    A boolean indicating if anyone can bid.
      */
     function setAnyoneBid(
-        ISetToken _setToken, 
+        ISetToken _setToken,
         bool _status
-    ) 
-        external 
-        onlyManagerAndValidSet(_setToken) 
+    )
+        external
+        onlyManagerAndValidSet(_setToken)
     {
-        permissionInfo[_setToken].anyoneBid = _status;
+        // Update the anyoneBid status in the PermissionInfo struct
+        permissionInfo[_setToken].isAnyoneAllowedToBid = _status;
+
+        // Emit an event to log the updated anyoneBid status
         emit AnyoneBidUpdated(_setToken, _status);
     }
 
+
     /**
-     * @dev MANAGER ONLY: Called to initialize module to SetToken in order to allow AuctionRebalanceModuleV1 access for rebalances.
-     * Grabs the current units for each asset in the Set and set's the targetUnit to that unit in order to prevent any
-     * bidding until startRebalance() is explicitly called. Position multiplier is also logged in order to make sure any
-     * position multiplier changes don't unintentionally open the Set for rebalancing.
+     * @dev MANAGER ONLY: Initializes the module for a SetToken, enabling access to AuctionModuleV1 for rebalances.
+     * Retrieves the current units for each asset in the Set and sets the targetUnit to match the current unit, effectively
+     * preventing any bidding until `startRebalance()` is explicitly called. The position multiplier is also logged to ensure that
+     * any changes to the position multiplier do not unintentionally open the Set for rebalancing.
      *
-     * @param _setToken         Address of the Set Token
+     * @param _setToken   Address of the Set Token
      */
     function initialize(ISetToken _setToken)
         external
@@ -432,17 +504,18 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
         _setToken.initializeModule();
     }
 
+
     /**
      * @dev Called by a SetToken to notify that this module was removed from the SetToken.
-     * Clears the rebalanceInfo and permissionsInfo of the calling SetToken.
-     * IMPORTANT: SetToken's auction execution settings, including auction params,
-     * are NOT DELETED. Restoring a previously removed module requires that care is taken to
-     * initialize execution settings appropriately.
+     * Clears the `rebalanceInfo` and `permissionsInfo` of the calling SetToken.
+     * IMPORTANT: The auction execution settings of the SetToken, including auction parameters,
+     * are NOT DELETED. Restoring a previously removed module requires careful initialization of
+     * the execution settings.
      */
     function removeModule() external override {
         BidPermissionInfo storage tokenPermissionInfo = permissionInfo[ISetToken(msg.sender)];
 
-        for (uint i = 0; i < tokenPermissionInfo.biddersHistory.length; i++) {
+        for (uint256 i = 0; i < tokenPermissionInfo.biddersHistory.length; i++) {
             tokenPermissionInfo.bidAllowList[tokenPermissionInfo.biddersHistory[i]] = false;
         }
 
@@ -454,11 +527,21 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
     /* ============ External View Functions ============ */
 
     /**
-     * @dev Get the array of SetToken components involved in rebalance.
+     * @dev Checks externally if the rebalance duration has elapsed for the given SetToken.
      *
-     * @param _setToken         Address of the SetToken
+     * @param _setToken The SetToken whose rebalance duration is being checked.
+     * @return bool True if the rebalance duration has elapsed; false otherwise.
+     */
+    function isRebalanceDurationElapsed(ISetToken _setToken) external view returns (bool) {
+        return _isRebalanceDurationElapsed(_setToken);
+    }
+
+    /**
+     * @dev Retrieves the array of components that are involved in the rebalancing of the given SetToken.
      *
-     * @return address[]        Array of _setToken components involved in rebalance
+     * @param _setToken    Instance of the SetToken.
+     *
+     * @return address[]   Array of component addresses involved in the rebalance.
      */
     function getRebalanceComponents(ISetToken _setToken)
         external
@@ -470,14 +553,14 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
     }
 
     /**
-     * @dev Calculates the amount of a component is remaining to be auctioned and whether the component is being bought or sold.
-     * If currentUnit and targetUnit are the same, function will revert.
+     * @dev Calculates the quantity of a component involved in the rebalancing of the given SetToken,
+     * and determines if the component is being bought or sold.
      *
-     * @param _setToken                 Instance of the SetToken to rebalance
-     * @param _component                IERC20 component to bid
+     * @param _setToken    Instance of the SetToken being rebalanced.
+     * @param _component   Instance of the IERC20 component to bid on.
      *
-     * @return isSendTokenFixed         Boolean indicating fixed asset is send token
-     * @return componentQuantity        Amount of component in the bid
+     * @return isSellAuction       Indicates if this is a sell auction (true) or a buy auction (false).
+     * @return componentQuantity   Quantity of the component involved in the bid.
      */
     function getAuctionSizeAndDirection(
         ISetToken _setToken,
@@ -486,55 +569,105 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
         external
         view
         onlyValidAndInitializedSet(_setToken)
-        returns (bool, uint256)
+        returns (bool isSellAuction, uint256 componentQuantity)
     {
         require(
             rebalanceInfo[_setToken].rebalanceComponents.contains(address(_component)),
-            "Component not recognized"
+            "Component not part of rebalance"
         );
+        
         uint256 totalSupply = _setToken.totalSupply();
         return _calculateAuctionSizeAndDirection(_setToken, _component, totalSupply);
     }
 
     /**
-     * @dev Calculates the amount of a component is going to be exchanged in bid and whether 
-     * the component is being bought or sold.
+     * @dev Retrieves the balance of the quote asset for a given SetToken.
      *
-     * @param _setToken             Instance of the SetToken to be rebalanced
-     * @param _component            Instance of the component auction to bid on
-     * @param _componentQuantity    Amount of component in the bid
-     * @param _ethQuantityLimit     Max/min amount of ETH spent/received during bid
+     * @param _setToken The SetToken whose quote asset balance is being retrieved.
+     * @return uint256 The balance of the quote asset.
+     */
+    function getQuoteAssetBalance(ISetToken _setToken) external view returns (uint256) {
+        RebalanceInfo storage rebalance = rebalanceInfo[_setToken];
+        return IERC20(rebalance.quoteAsset).balanceOf(address(_setToken));
+    }
+
+    /**
+     * @dev Generates a preview of the bid for a given component in the rebalancing of the SetToken.
+     * It calculates the quantity of the component that will be exchanged and the direction of exchange.
      *
-     * @return bidInfo              Struct containing data for bid
+     * @param _setToken             Instance of the SetToken being rebalanced.
+     * @param _component            Instance of the component auction to bid on.
+     * @param _componentQuantity    Quantity of the component involved in the bid.
+     * @param _quoteQuantityLimit   Maximum or minimum amount of quote asset spent or received during the bid.
+     *
+     * @return BidInfo              Struct containing data for the bid.
      */
     function getBidPreview(
         ISetToken _setToken,
         IERC20 _component,
         uint256 _componentQuantity,
-        uint256 _ethQuantityLimit
+        uint256 _quoteQuantityLimit
     )
         external
         view
         onlyValidAndInitializedSet(_setToken)
-        returns (BidInfo memory bidInfo)
+        returns (BidInfo memory)
     {
         _validateBidTargets(_setToken, _component);
-
-        bidInfo = _createBidInfo(_setToken, _component, _componentQuantity, _ethQuantityLimit);
+        BidInfo memory bidInfo = _createBidInfo(_setToken, _component, _componentQuantity, _quoteQuantityLimit);
+        
+        return bidInfo;
     }
 
     /**
-     * @dev Get if a given address is an allowed bidder.
+     * @dev Checks externally if the conditions for early unlock are met.
      *
-     * @param _setToken         Address of the SetToken
-     * @param _bidder           Address of the bidder
-     *
-     * @return bool             True if _bidder is allowed to bid, else false
+     * @param _setToken The SetToken being checked.
+     * @return bool True if early unlock conditions are met; false otherwise.
      */
-    function getIsAllowedBidder(
-        ISetToken _setToken, 
-        address _bidder
-    )
+    function canUnlockEarly(ISetToken _setToken) external view returns (bool) {
+        return _canUnlockEarly(_setToken);
+    }
+
+    /**
+     * @dev Checks externally if the conditions to raise asset targets are met.
+     *
+     * @param _setToken The SetToken being checked.
+     * @return bool True if conditions to raise asset targets are met; false otherwise.
+     */
+    function canRaiseAssetTargets(ISetToken _setToken) external view returns (bool) {
+        return _canRaiseAssetTargets(_setToken);
+    }
+
+    /**
+     * @dev Checks externally if all target units for components have been met.
+     *
+     * @param _setToken Instance of the SetToken to be rebalanced.
+     * @return bool True if all component's target units have been met; false otherwise.
+     */
+    function allTargetsMet(ISetToken _setToken) external view returns (bool) {
+        return _allTargetsMet(_setToken);
+    }
+
+    /**
+     * @dev Checks externally if the quote asset is in excess or at target.
+     *
+     * @param _setToken The SetToken being checked.
+     * @return bool True if the quote asset is in excess or at target; false otherwise.
+     */
+    function isQuoteAssetExcessOrAtTarget(ISetToken _setToken) external view returns (bool) {
+        return _isQuoteAssetExcessOrAtTarget(_setToken);
+    }
+
+    /**
+     * @dev Determines whether the given bidder address is allowed to participate in the auction.
+     *
+     * @param _setToken   Instance of the SetToken for which the bid is being placed.
+     * @param _bidder     Address of the bidder.
+     *
+     * @return bool       True if the given `_bidder` is permitted to bid, false otherwise.
+     */
+    function isAllowedBidder(ISetToken _setToken, address _bidder)
         external
         view
         onlyValidAndInitializedSet(_setToken)
@@ -544,11 +677,11 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
     }
 
     /**
-     * @dev Get the list of bidders who are allowed to call bid()
+     * @dev Retrieves the list of addresses that are permitted to participate in the auction by calling `bid()`.
      *
-     * @param _setToken         Address of the SetToken
+     * @param _setToken           Instance of the SetToken for which to retrieve the list of allowed bidders.
      *
-     * @return address[]
+     * @return address[]          Array of addresses representing the allowed bidders.
      */
     function getAllowedBidders(ISetToken _setToken)
         external
@@ -562,149 +695,49 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
     /* ============ Internal Functions ============ */
 
     /**
-     * @dev Create and return BidInfo struct. This function reverts if the target has already been met.
+     * @dev Aggregates the current SetToken components with the new components and validates their auction parameters.
+     * Ensures that the sizes of the new components and new auction parameters arrays are the same, and that the number of current component auction parameters
+     * matches the number of current components. Additionally, it validates that the price adapter exists, the price adapter configuration data is valid for the adapter,
+     * and the target unit is greater than zero for new components. The function reverts if there is a duplicate component or if the array lengths are mismatched.
      *
-     * @param _setToken             Address of the SetToken to be rebalanced
-     * @param _component            Address of the component auction to bid on
-     * @param _componentQuantity    Amount of component in the bid
-     * @param _ethQuantityLimit     Max/min amount of ETH spent/received during bid
-     *
-     * @return bidInfo              Struct containing data for bid
+     * @param _currentComponents          The current set of SetToken components.
+     * @param _newComponents              The new components to add to the allocation.
+     * @param _newComponentsAuctionParams The auction params for the new components, corresponding by index.
+     * @param _oldComponentsAuctionParams The auction params for the old components, corresponding by index.
+     * @return aggregateComponents        Combined array of current and new components, without duplicates.
+     * @return aggregateAuctionParams     Combined array of old and new component auction params, without duplicates.
      */
-    function _createBidInfo(
-        ISetToken _setToken,
-        IERC20 _component,
-        uint256 _componentQuantity,
-        uint256 _ethQuantityLimit
+    function _aggregateComponentsAndAuctionParams(
+        address[] memory _currentComponents,
+        address[] calldata _newComponents,
+        AuctionExecutionParams[] memory _newComponentsAuctionParams,
+        AuctionExecutionParams[] memory _oldComponentsAuctionParams
     )
         internal
         view
-        virtual
-        returns (BidInfo memory bidInfo)
+        returns (address[] memory aggregateComponents, AuctionExecutionParams[] memory aggregateAuctionParams)
     {
-        bidInfo.setToken = _setToken;
-        bidInfo.component = _component;
-        bidInfo.setTotalSupply = _setToken.totalSupply();
+        // Validate input arrays: new components and new auction params must have the same length,
+        // old components and old auction params must have the same length.
+        require(_newComponents.length == _newComponentsAuctionParams.length, "New components and params length mismatch");
+        require(_currentComponents.length == _oldComponentsAuctionParams.length, "Old components and params length mismatch");
 
-        bidInfo.priceAdapter = _getAuctionPriceAdapter(_setToken, _component);
-        bidInfo.priceAdapterData = executionInfo[_setToken][_component].priceAdapterData;
-        
-        (
-            bidInfo.isSendToken,
-            bidInfo.maxComponentQuantity
-        ) = _calculateAuctionSizeAndDirection(_setToken, _component, bidInfo.setTotalSupply);
+        // Aggregate the current components and new components
+        aggregateComponents = _currentComponents.extend(_newComponents);
 
-        require(_componentQuantity <= bidInfo.maxComponentQuantity, "Bid size too large");
+        // Ensure there are no duplicates in the aggregated components
+        require(!aggregateComponents.hasDuplicate(), "Cannot have duplicate components");
 
-        bidInfo.price = bidInfo.priceAdapter.getPrice(
-            _setToken,
-            _component,
-            _componentQuantity,
-            block.timestamp - rebalanceInfo[_setToken].startTime,
-            rebalanceInfo[_setToken].duration,
-            bidInfo.priceAdapterData
-        );
-
-        uint256 ethQuantity = _componentQuantity.preciseMul(bidInfo.price);
-
-        if (bidInfo.isSendToken){
-            bidInfo.sendToken = address(_component);
-            bidInfo.receiveToken = address(weth);
-
-            require(ethQuantity <= _ethQuantityLimit, "WETH input exceeds maximum");
-
-            bidInfo.sendQuantity = _componentQuantity;
-            bidInfo.receiveQuantity = ethQuantity;
-        } else {
-            bidInfo.sendToken = address(weth);
-            bidInfo.receiveToken = address(_component);
-
-            require(ethQuantity >= _ethQuantityLimit, "WETH output below minimum");
-
-            bidInfo.sendQuantity = ethQuantity;
-            bidInfo.receiveQuantity = _componentQuantity;
-        }
-
-        bidInfo.preBidSendTokenBalance = IERC20(bidInfo.sendToken).balanceOf(address(_setToken));
-        bidInfo.preBidReceiveTokenBalance = IERC20(bidInfo.receiveToken).balanceOf(address(_setToken));
+        // Aggregate and validate the old and new auction params
+        aggregateAuctionParams = _concatAndValidateAuctionParams(_oldComponentsAuctionParams, _newComponentsAuctionParams);
     }
 
     /**
-     * @dev Execute the token transfers of the bid
+     * @dev Validates that the component is an eligible target for bids during the rebalance. Bids cannot be placed explicitly
+     * on the rebalance quote asset, it may only be implicitly bid by being the quote asset for other component bids.
      *
-     * @param _bidInfo          Struct containing data for bid
-     */
-    function _executeBid(
-        BidInfo memory _bidInfo
-    )
-        internal 
-        virtual
-    {
-        transferFrom(
-            IERC20(_bidInfo.receiveToken),
-            msg.sender,
-            address(_bidInfo.setToken),
-            _bidInfo.receiveQuantity
-        );
-
-        _bidInfo.setToken.strictInvokeTransfer(
-            _bidInfo.sendToken,
-            msg.sender,
-            _bidInfo.sendQuantity
-        );
-    }
-
-    /**
-     * @dev Retrieve fee from controller and calculate total protocol fee and send from SetToken to protocol recipient.
-     * The protocol fee is collected from the amount of received token in the bid.
-     *
-     * @param _bidInfo                Struct containing bid information used in internal functions
-     *
-     * @return protocolFee              Amount of receive token taken as protocol fee
-     */
-    function _accrueProtocolFee(BidInfo memory _bidInfo) internal returns (uint256 protocolFee) {
-        uint256 exchangedQuantity =  IERC20(_bidInfo.receiveToken)
-            .balanceOf(address(_bidInfo.setToken))
-            .sub(_bidInfo.preBidReceiveTokenBalance);
-
-        protocolFee = getModuleFee(AUCTION_REBALANCE_MODULE_PROTOCOL_FEE_INDEX, exchangedQuantity);
-        payProtocolFeeFromSetToken(_bidInfo.setToken, _bidInfo.receiveToken, protocolFee);
-    }
-
-    /**
-     * @dev Update SetToken positions. This function is intended to be called after the fees have been accrued, 
-     * hence it returns the amount of tokens bought net of fees.
-     *
-     * @param _bidInfo                Struct containing bid information used in internal functions
-     *
-     * @return netSendAmount            Amount of sendTokens used in the bid
-     * @return netReceiveAmount         Amount of receiveTokens received in the bid (net of fees)
-     */
-    function _updatePositionState(BidInfo memory _bidInfo)
-        internal
-        returns (uint256 netSendAmount, uint256 netReceiveAmount)
-    {
-        (uint256 postBidSendTokenBalance,,) = _bidInfo.setToken.calculateAndEditDefaultPosition(
-            _bidInfo.sendToken,
-            _bidInfo.setTotalSupply,
-            _bidInfo.preBidSendTokenBalance
-        );
-        (uint256 postBidReceiveTokenBalance,,) = _bidInfo.setToken.calculateAndEditDefaultPosition(
-            _bidInfo.receiveToken,
-            _bidInfo.setTotalSupply,
-            _bidInfo.preBidReceiveTokenBalance
-        );
-
-        netSendAmount = _bidInfo.preBidSendTokenBalance.sub(postBidSendTokenBalance);
-        netReceiveAmount = postBidReceiveTokenBalance.sub(_bidInfo.preBidReceiveTokenBalance);
-    }
-
-    /**
-     * @dev Validate that component is a valid component with an active auction. Bids cannot be explicitly placed on WETH, 
-     * it may only implicitly be bid on by being the quote asset for other component bids.
-     *
-     * @param _setToken         Instance of the SetToken
-     * @param _component        IERC20 component to be validated
+     * @param _setToken     The SetToken instance involved in the rebalance.
+     * @param _component    The component to be validated.
      */
     function _validateBidTargets(
         ISetToken _setToken,
@@ -713,27 +746,154 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
         internal
         view
     {
-        require(address(_component) != address(weth), "Can not explicitly bid WETH");
-        require(
-            rebalanceInfo[_setToken].rebalanceComponents.contains(address(_component)),
-            "Component not part of rebalance"
-        );
+        // Ensure that the component is not the quote asset, as it cannot be explicitly bid on.
+        require(address(_component) != address(rebalanceInfo[_setToken].quoteAsset), "Cannot bid explicitly on Quote Asset");
 
+        // Ensure that the component is part of the rebalance.
+        require(rebalanceInfo[_setToken].rebalanceComponents.contains(address(_component)), "Component not part of rebalance");
+
+        // Ensure that the SetToken doesn't have an external position for the component.
         require(!_setToken.hasExternalPosition(address(_component)), "External positions not allowed");
 
-        require(rebalanceInfo[_setToken].startTime + rebalanceInfo[_setToken].duration > block.timestamp, "Rebalance must be in progress");
+        // Ensure that the rebalance is in progress.
+        require(!_isRebalanceDurationElapsed(_setToken), "Rebalance must be in progress");
     }
 
     /**
-     * @dev Calculates the amount of a component is remaining to be auctioned and whether the component is being bought or sold.
-     * If currentUnit and targetUnit are the same, function will revert.
+     * @dev Creates and returns a BidInfo struct. The function reverts if the auction target has already been met.
      *
-     * @param _setToken                 Instance of the SetToken to rebalance
-     * @param _component                Address of the component auction to bid on
-     * @param _totalSupply              Total supply of _setToken
+     * @param _setToken             The SetToken instance involved in the rebalance.
+     * @param _component            The component to bid on.
+     * @param _componentQuantity    The amount of component in the bid.
+     * @param _quoteQuantityLimit   The max/min amount of quote asset to be spent/received during the bid.
      *
-     * @return isSendToken              Boolean indicating if sendToken is the component
-     * @return maxComponentQuantity     Quantity of component to be exchanged to settle the auction
+     * @return bidInfo              Struct containing data for the bid.
+     */
+    function _createBidInfo(
+        ISetToken _setToken,
+        IERC20 _component,
+        uint256 _componentQuantity,
+        uint256 _quoteQuantityLimit
+    )
+        internal
+        view
+        returns (BidInfo memory bidInfo)
+    {
+        // Populate the bid info structure with basic information.
+        bidInfo.setToken = _setToken;
+        bidInfo.setTotalSupply = _setToken.totalSupply();
+        bidInfo.priceAdapter = _getAuctionPriceAdapter(_setToken, _component);
+        bidInfo.priceAdapterConfigData = executionInfo[_setToken][_component].priceAdapterConfigData;
+
+        // Calculate the auction size and direction.
+        (bidInfo.isSellAuction, bidInfo.auctionQuantity) = _calculateAuctionSizeAndDirection(
+            _setToken,
+            _component,
+            bidInfo.setTotalSupply
+        );
+
+        // Ensure that the component quantity in the bid does not exceed the available auction quantity.
+        require(_componentQuantity <= bidInfo.auctionQuantity, "Bid size exceeds auction quantity");
+
+        // Set the sendToken and receiveToken based on the auction type (sell or buy).
+        (bidInfo.sendToken, bidInfo.receiveToken) = _getSendAndReceiveTokens(bidInfo.isSellAuction, _setToken, _component);
+
+        // Retrieve the current price for the component.
+        bidInfo.componentPrice = bidInfo.priceAdapter.getPrice(
+            _setToken,
+            _component,
+            _componentQuantity,
+            block.timestamp.sub(rebalanceInfo[_setToken].rebalanceStartTime),
+            rebalanceInfo[_setToken].rebalanceDuration,
+            bidInfo.priceAdapterConfigData
+        );
+        
+        // Calculate the quantity of quote asset involved in the bid.
+        uint256 quoteAssetQuantity = _calculateQuoteAssetQuantity(
+            bidInfo.isSellAuction,
+            _componentQuantity,
+            bidInfo.componentPrice
+        );
+
+        // Store pre-bid token balances for later use.
+        bidInfo.preBidTokenSentBalance = bidInfo.sendToken.balanceOf(address(_setToken));
+        bidInfo.preBidTokenReceivedBalance = bidInfo.receiveToken.balanceOf(address(_setToken));
+
+        // Validate quote asset quantity against bidder's limit.
+        _validateQuoteAssetQuantity(
+            bidInfo.isSellAuction,
+            quoteAssetQuantity,
+            _quoteQuantityLimit,
+            bidInfo.preBidTokenSentBalance
+        );
+
+        // Calculate quantities sent and received by the Set during the bid.
+        (bidInfo.quantitySentBySet, bidInfo.quantityReceivedBySet) = _calculateQuantitiesForBid(
+            bidInfo.isSellAuction,
+            _componentQuantity,
+            quoteAssetQuantity
+        );
+    }
+
+    /**
+     * @notice Determines tokens involved in the bid based on auction type.
+     * @param isSellAuction       Is the auction a sell type.
+     * @param _setToken           The SetToken involved in the rebalance.
+     * @param _component          The component involved in the auction.
+     * @return                    The tokens to send and receive in the bid.
+     */
+    function _getSendAndReceiveTokens(bool isSellAuction, ISetToken _setToken, IERC20 _component) private view returns (IERC20, IERC20) {
+        return isSellAuction ? (_component, IERC20(rebalanceInfo[_setToken].quoteAsset)) : (IERC20(rebalanceInfo[_setToken].quoteAsset), _component);
+    }
+
+    /**
+     * @notice Calculates the quantity of quote asset involved in the bid.
+     * @param isSellAuction        Is the auction a sell type.
+     * @param _componentQuantity   The amount of component in the bid.
+     * @param _componentPrice      The price of the component.
+     * @return                     The quantity of quote asset in the bid.
+     */
+    function _calculateQuoteAssetQuantity(bool isSellAuction, uint256 _componentQuantity, uint256 _componentPrice) private pure returns (uint256) {
+        return isSellAuction ? _componentQuantity.preciseMulCeil(_componentPrice) : _componentQuantity.preciseMul(_componentPrice);
+    }
+
+    /**
+     * @notice Validates the quote asset quantity against bidder's limit.
+     * @param isSellAuction            Is the auction a sell type.
+     * @param quoteAssetQuantity       The quantity of quote asset in the bid.
+     * @param _quoteQuantityLimit      The max/min amount of quote asset to be spent/received.
+     * @param preBidTokenSentBalance   The balance of tokens sent before the bid.
+     */
+    function _validateQuoteAssetQuantity(bool isSellAuction, uint256 quoteAssetQuantity, uint256 _quoteQuantityLimit, uint256 preBidTokenSentBalance) private pure {
+        if (isSellAuction) {
+            require(quoteAssetQuantity <= _quoteQuantityLimit, "Quote asset quantity exceeds limit");
+        } else {
+            require(quoteAssetQuantity >= _quoteQuantityLimit, "Quote asset quantity below limit");
+            require(quoteAssetQuantity <= preBidTokenSentBalance, "Insufficient quote asset balance");
+        }
+    }
+
+    /**
+     * @notice Calculates the quantities sent and received by the Set during the bid.
+     * @param isSellAuction        Is the auction a sell type.
+     * @param _componentQuantity   The amount of component in the bid.
+     * @param quoteAssetQuantity   The quantity of quote asset in the bid.
+     * @return                     The quantities of tokens sent and received by the Set.
+     */
+    function _calculateQuantitiesForBid(bool isSellAuction, uint256 _componentQuantity, uint256 quoteAssetQuantity) private pure returns (uint256, uint256) {
+        return isSellAuction ? (_componentQuantity, quoteAssetQuantity) : (quoteAssetQuantity, _componentQuantity);
+    }
+
+    /**
+     * @dev Calculates the size and direction of the auction for a given component. Determines whether the component
+     * is being bought or sold and the quantity required to settle the auction.
+     *
+     * @param _setToken            The SetToken instance to be rebalanced.
+     * @param _component           The component whose auction size and direction need to be calculated.
+     * @param _totalSupply         The total supply of the SetToken.
+     *
+     * @return isSellAuction       Indicates if this is a sell auction (true) or a buy auction (false).
+     * @return maxComponentQty     The maximum quantity of the component to be exchanged to settle the auction.
      */
     function _calculateAuctionSizeAndDirection(
         ISetToken _setToken,
@@ -742,10 +902,11 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
     )
         internal
         view
-        returns (bool isSendToken, uint256 maxComponentQuantity)
+        returns (bool isSellAuction, uint256 maxComponentQty)
     {
-        uint256 protocolFee = controller.getModuleFee(address(this), AUCTION_REBALANCE_MODULE_PROTOCOL_FEE_INDEX);
+        uint256 protocolFee = controller.getModuleFee(address(this), AUCTION_MODULE_V1_PROTOCOL_FEE_INDEX);
 
+        // Retrieve the current and target units, and notional amounts of the component
         (
             uint256 currentUnit,
             uint256 targetUnit,
@@ -753,64 +914,256 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
             uint256 targetNotional
         ) = _getUnitsAndNotionalAmounts(_setToken, _component, _totalSupply);
 
+        // Ensure that the current unit and target unit are not the same
         require(currentUnit != targetUnit, "Target already met");
 
-        isSendToken = targetNotional < currentNotional;
+        // Determine whether the component is being sold (sendToken) or bought
+        isSellAuction = targetNotional < currentNotional;
 
-        // In order to account for fees taken by protocol when buying the notional difference between currentUnit
-        // and targetUnit is divided by (1 - protocolFee) to make sure that targetUnit can be met. Failure to
-        // do so would lead to never being able to meet target of components that need to be bought.
-        //
-        // ? - lesserOf: (componentMaxSize, (currentNotional - targetNotional))
-        // : - lesserOf: (componentMaxSize, (targetNotional - currentNotional) / 10 ** 18 - protocolFee)
-        maxComponentQuantity = isSendToken
+        // Calculate the max quantity of the component to be exchanged. If buying, account for the protocol fees.
+        maxComponentQty = isSellAuction
             ? currentNotional.sub(targetNotional)
             : targetNotional.sub(currentNotional).preciseDiv(PreciseUnitMath.preciseUnit().sub(protocolFee));
     }
 
-    /**
-     * @dev Extends and/or updates the current component set and its auction params with new components and auction params,
-     * Validates inputs, requiring that that new components and new auction params arrays are the same size, and
-     * that the number of old components auction params matches the number of current components. Throws if
-     * a duplicate component has been added.
+      /**
+     * @dev Executes the bid by performing token transfers.
      *
-     * @param  _currentComponents               Complete set of current SetToken components
-     * @param _newComponents                    Array of new components to add to allocation
-     * @param _newComponentsAuctionParams       Array of AuctionExecutionParams for new components, maps to same index of _newComponents array
-     * @param _oldComponentsAuctionParams       Array of AuctionExecutionParams for old component, maps to same index of
-     *                                               _setToken.getComponents() array, if component being removed set to 0.
-     * @return aggregateComponents              Array of current components extended by new components, without duplicates
-     * @return aggregateAuctionParams           Array of old component AuctionExecutionParams extended by new AuctionExecutionParams, without duplicates
+     * @param _bidInfo      Struct containing the bid information.
      */
-    function _getAggregateComponentsAndAuctionParams(
-        address[] memory _currentComponents,
-        address[] calldata _newComponents,
-        AuctionExecutionParams[] memory _newComponentsAuctionParams,
-        AuctionExecutionParams[] memory _oldComponentsAuctionParams
+    function _executeBid(
+        BidInfo memory _bidInfo
     )
         internal
-        pure
-        returns (address[] memory aggregateComponents, AuctionExecutionParams[] memory aggregateAuctionParams)
     {
-        // Don't use validate arrays because empty arrays are valid
-        require(_newComponents.length == _newComponentsAuctionParams.length, "Array length mismatch");
-        require(_currentComponents.length == _oldComponentsAuctionParams.length, "Old Components targets missing");
+        // Transfer the received tokens from the sender to the SetToken.
+        transferFrom(
+            _bidInfo.receiveToken,
+            msg.sender,
+            address(_bidInfo.setToken),
+            _bidInfo.quantityReceivedBySet
+        );
 
-        aggregateComponents = _currentComponents.extend(_newComponents);
-        aggregateAuctionParams = _extendAuctionParams(_oldComponentsAuctionParams, _newComponentsAuctionParams);
-
-        require(!aggregateComponents.hasDuplicate(), "Cannot duplicate components");
+        // Invoke the transfer of the sent tokens from the SetToken to the sender.
+        _bidInfo.setToken.strictInvokeTransfer(
+            address(_bidInfo.sendToken),
+            msg.sender,
+            _bidInfo.quantitySentBySet
+        );
     }
 
     /**
-     * @dev Adds or removes newly permissioned bidder to/from permissionsInfo bidderHistory. It's
-     * necessary to verify that bidderHistory contains the address because AddressArrayUtils will
-     * throw when attempting to remove a non-element and it's possible someone can set a new
-     * bidder's status to false.
+     * @dev Calculates the protocol fee based on the tokens received during the bid and transfers it
+     * from the SetToken to the protocol recipient.
      *
-     * @param _setToken                         Instance of the SetToken
-     * @param _bidder                           Bidder whose permission is being set
-     * @param _status                           Boolean permission being set
+     * @param _bidInfo  Struct containing information related to the bid.
+     *
+     * @return uint256  The amount of the received tokens taken as a protocol fee.
+     */
+    function _accrueProtocolFee(BidInfo memory _bidInfo) internal returns (uint256) {
+        IERC20 receiveToken = IERC20(_bidInfo.receiveToken);
+        ISetToken setToken = _bidInfo.setToken;
+
+        // Calculate the amount of tokens exchanged during the bid.
+        uint256 exchangedQuantity = receiveToken.balanceOf(address(setToken))
+            .sub(_bidInfo.preBidTokenReceivedBalance);
+        
+        // Calculate the protocol fee.
+        uint256 protocolFee = getModuleFee(AUCTION_MODULE_V1_PROTOCOL_FEE_INDEX, exchangedQuantity);
+        
+        // Transfer the protocol fee from the SetToken to the protocol recipient.
+        payProtocolFeeFromSetToken(setToken, address(_bidInfo.receiveToken), protocolFee);
+        
+        return protocolFee;
+    }
+
+    /**
+     * @dev Updates the positions of the SetToken after the bid. This function should be called
+     * after the protocol fees have been accrued. It calculates and returns the net amount of tokens
+     * used and received during the bid.
+     *
+     * @param _bidInfo  Struct containing information related to the bid.
+     *
+     * @return uint256  The net amount of send tokens used in the bid.
+     * @return uint256  The net amount of receive tokens after accounting for protocol fees.
+     */
+    function _updatePositionState(BidInfo memory _bidInfo)
+        internal
+        returns (uint256, uint256)
+    {
+        ISetToken setToken = _bidInfo.setToken;
+        
+        // Calculate and update positions for send tokens.
+        (uint256 postBidSendTokenBalance,,) = setToken.calculateAndEditDefaultPosition(
+            address(_bidInfo.sendToken),
+            _bidInfo.setTotalSupply,
+            _bidInfo.preBidTokenSentBalance
+        );
+        
+        // Calculate and update positions for receive tokens.
+        (uint256 postBidReceiveTokenBalance,,) = setToken.calculateAndEditDefaultPosition(
+            address(_bidInfo.receiveToken),
+            _bidInfo.setTotalSupply,
+            _bidInfo.preBidTokenReceivedBalance
+        );
+
+        // Calculate the net amount of tokens used and received.
+        uint256 netSendAmount = _bidInfo.preBidTokenSentBalance.sub(postBidSendTokenBalance);
+        uint256 netReceiveAmount = postBidReceiveTokenBalance.sub(_bidInfo.preBidTokenReceivedBalance);
+
+        return (netSendAmount, netReceiveAmount);
+    }
+
+    /**
+     * @dev Retrieves the unit and notional amount values for the current position and target.
+     * These are necessary to calculate the bid size and direction.
+     *
+     * @param _setToken             Instance of the SetToken to be rebalanced.
+     * @param _component            The component to calculate notional amounts for.
+     * @param _totalSupply          SetToken total supply.
+     *
+     * @return uint256              Current default position real unit of the component.
+     * @return uint256              Normalized unit of the bid target.
+     * @return uint256              Current notional amount, based on total notional amount of SetToken default position.
+     * @return uint256              Target notional amount, based on total SetToken supply multiplied by targetUnit.
+     */
+    function _getUnitsAndNotionalAmounts(
+        ISetToken _setToken,
+        IERC20 _component,
+        uint256 _totalSupply
+    )
+        internal
+        view
+        returns (uint256, uint256, uint256, uint256)
+    {
+        uint256 currentUnit = _getDefaultPositionRealUnit(_setToken, _component);
+        uint256 targetUnit = _getNormalizedTargetUnit(_setToken, _component);
+
+        uint256 currentNotionalAmount = _totalSupply.getDefaultTotalNotional(currentUnit);
+        uint256 targetNotionalAmount = _totalSupply.preciseMulCeil(targetUnit);
+
+        return (currentUnit, targetUnit, currentNotionalAmount, targetNotionalAmount);
+    }
+
+    /**
+     * @dev Checks if all target units for components have been met.
+     *
+     * @param _setToken        Instance of the SetToken to be rebalanced.
+     *
+     * @return bool            True if all component's target units have been met; false otherwise.
+     */
+    function _allTargetsMet(ISetToken _setToken) internal view returns (bool) {
+        address[] memory rebalanceComponents = rebalanceInfo[_setToken].rebalanceComponents;
+
+        for (uint256 i = 0; i < rebalanceComponents.length; i++) {
+            if (_targetUnmet(_setToken, rebalanceComponents[i])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @dev Determines if the target units for a given component are met. Takes into account minor rounding errors.
+     * WETH is not checked as it is allowed to float around its target.
+     *
+     * @param _setToken        Instance of the SetToken to be rebalanced.
+     * @param _component       Component whose target is evaluated.
+     *
+     * @return bool            True if component's target units are met; false otherwise.
+     */
+    function _targetUnmet(
+        ISetToken _setToken,
+        address _component
+    )
+        internal
+        view
+        returns(bool)
+    {
+        if (_component == address(rebalanceInfo[_setToken].quoteAsset)) return false;
+
+        uint256 normalizedTargetUnit = _getNormalizedTargetUnit(_setToken, IERC20(_component));
+        uint256 currentUnit = _getDefaultPositionRealUnit(_setToken, IERC20(_component));
+
+        return (normalizedTargetUnit > 0)
+            ? !normalizedTargetUnit.approximatelyEquals(currentUnit, 1)
+            : normalizedTargetUnit != currentUnit;
+    }
+
+    /**
+     * @dev Retrieves the SetToken's default position real unit.
+     *
+     * @param _setToken        Instance of the SetToken.
+     * @param _component       Component to fetch the default position for.
+     *
+     * @return uint256         Real unit position.
+     */
+    function _getDefaultPositionRealUnit(
+        ISetToken _setToken,
+        IERC20 _component
+    )
+        internal
+        view
+        returns (uint256)
+    {
+        return _setToken.getDefaultPositionRealUnit(address(_component)).toUint256();
+    }
+
+    /**
+     * @dev Calculates and retrieves the normalized target unit value for a given component.
+     *
+     * @param _setToken        Instance of the SetToken.
+     * @param _component       Component whose normalized target unit is required.
+     *
+     * @return uint256         Normalized target unit of the component.
+     */
+    function _getNormalizedTargetUnit(
+        ISetToken _setToken,
+        IERC20 _component
+    )
+        internal
+        view
+        returns(uint256)
+    {
+        // (targetUnit * current position multiplier) / position multiplier at the start of rebalance
+        return executionInfo[_setToken][_component]
+            .targetUnit
+            .mul(_setToken.positionMultiplier().toUint256())
+            .div(rebalanceInfo[_setToken].positionMultiplier);
+    }
+
+    /**
+     * @dev Checks if the specified address is allowed to call the bid for the SetToken.
+     * If `anyoneBid` is set to true, any address is allowed, otherwise the address
+     * must be explicitly approved.
+     *
+     * @param _setToken         Instance of the SetToken to be rebalanced.
+     * @param _bidder           Address of the bidder.
+     *
+     * @return bool             True if the address is allowed to bid, false otherwise.
+     */
+    function _isAllowedBidder(
+        ISetToken _setToken, 
+        address _bidder
+    ) 
+        internal 
+        view 
+        returns (bool) 
+    {
+        BidPermissionInfo storage permissions = permissionInfo[_setToken];
+        return permissions.isAnyoneAllowedToBid || permissions.bidAllowList[_bidder];
+    }
+
+    /**
+     * @dev Updates the permission status of a bidder and maintains a history. This function adds
+     * the bidder to the history if being permissioned, and removes it if being unpermissioned.
+     * Ensures that AddressArrayUtils does not throw by verifying the presence of the address
+     * before removal.
+     *
+     * @param _setToken         Instance of the SetToken.
+     * @param _bidder           Address of the bidder whose permission is being updated.
+     * @param _status           The permission status being set (true for permissioned, false for unpermissioned).
      */
     function _updateBiddersHistory(
         ISetToken _setToken, 
@@ -827,192 +1180,117 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
     }
 
     /**
-     * @dev Determine if passed address is allowed to call bid for the SetToken. If anyoneBid set to true anyone 
-     * can call otherwise needs to be approved.
+     * @dev Checks if the rebalance duration has elapsed for the given SetToken.
      *
-     * @param _setToken             Instance of SetToken to be rebalanced
-     * @param  _bidder              Address of the bidder who called contract function
-     *
-     * @return bool                 True if bidder is an approved bidder for the SetToken
+     * @param _setToken The SetToken whose rebalance duration is being checked.
+     * @return bool True if the rebalance duration has elapsed; false otherwise.
      */
-    function _isAllowedBidder(
-        ISetToken _setToken, 
-        address _bidder
-    ) 
-        internal 
-        view 
-        returns (bool) 
-    {
-        BidPermissionInfo storage permissions = permissionInfo[_setToken];
-        return permissions.anyoneBid || permissions.bidAllowList[_bidder];
+    function _isRebalanceDurationElapsed(ISetToken _setToken) internal view returns (bool) {
+        RebalanceInfo storage rebalance = rebalanceInfo[_setToken];
+        return (rebalance.rebalanceStartTime.add(rebalance.rebalanceDuration)) <= block.timestamp;
     }
 
     /**
-     * @dev Returns the combination of the two arrays of AuctionExecutionParams
-     * 
-     * @param oldAuctionParams The first array
-     * @param newAuctionParams The second array
-     * @return Returns A extended by B
+     * @dev Checks if the conditions for early unlock are met.
+     *
+     * @param _setToken The SetToken being checked.
+     * @return bool True if early unlock conditions are met; false otherwise.
      */
-    function _extendAuctionParams(
-        AuctionExecutionParams[] memory oldAuctionParams, 
-        AuctionExecutionParams[] memory newAuctionParams
-    ) 
-        internal 
-        pure 
-        returns (AuctionExecutionParams[] memory) 
-    {
-        uint256 aLength = oldAuctionParams.length;
-        uint256 bLength = newAuctionParams.length;
-        AuctionExecutionParams[] memory extendedAuctionParams = new AuctionExecutionParams[](aLength + bLength);
-        for (uint256 i = 0; i < aLength; i++) {
-            extendedAuctionParams[i] = oldAuctionParams[i];
-        }
-        for (uint256 j = 0; j < bLength; j++) {
-            extendedAuctionParams[aLength + j] = newAuctionParams[j];
-        }
-        return extendedAuctionParams;
+    function _canUnlockEarly(ISetToken _setToken) internal view returns (bool) {
+        RebalanceInfo storage rebalance = rebalanceInfo[_setToken];
+        return _allTargetsMet(_setToken) && _isQuoteAssetExcessOrAtTarget(_setToken) && rebalance.raiseTargetPercentage == 0;
     }
 
     /**
-     * @dev Gets unit and notional amount values for current position and target. These are necessary
-     * to calculate the bid size and direction.
+     * @dev Checks if the quote asset is in excess or at target.
      *
-     * @param _setToken                 Instance of the SetToken to rebalance
-     * @param _component                IERC20 component to calculate notional amounts for
-     * @param _totalSupply              SetToken total supply
-     *
-     * @return uint256              Current default position real unit of component
-     * @return uint256              Normalized unit of the bid target
-     * @return uint256              Current notional amount: total notional amount of SetToken default position
-     * @return uint256              Target notional amount: Total SetToken supply * targetUnit
+     * @param _setToken The SetToken being checked.
+     * @return bool True if the quote asset is in excess or at target; false otherwise.
      */
-    function _getUnitsAndNotionalAmounts(
-        ISetToken _setToken, 
-        IERC20 _component, 
-        uint256 _totalSupply
+    function _isQuoteAssetExcessOrAtTarget(ISetToken _setToken) internal view returns (bool) {
+        RebalanceInfo storage rebalance = rebalanceInfo[_setToken];
+        bool isExcess = _getDefaultPositionRealUnit(_setToken, rebalance.quoteAsset) > _getNormalizedTargetUnit(_setToken, rebalance.quoteAsset);
+        bool isAtTarget = _getDefaultPositionRealUnit(_setToken, rebalance.quoteAsset).approximatelyEquals(_getNormalizedTargetUnit(_setToken, rebalance.quoteAsset), 1);
+        return isExcess || isAtTarget;
+    }
+
+    /**
+     * @dev Checks if the conditions to raise asset targets are met.
+     *
+     * @param _setToken The SetToken being checked.
+     * @return bool True if conditions to raise asset targets are met; false otherwise.
+     */
+    function _canRaiseAssetTargets(ISetToken _setToken) internal view returns (bool) {
+        RebalanceInfo storage rebalance = rebalanceInfo[_setToken];
+        bool isQuoteAssetExcess = _getDefaultPositionRealUnit(_setToken, rebalance.quoteAsset) > _getNormalizedTargetUnit(_setToken, rebalance.quoteAsset);
+        return _allTargetsMet(_setToken) && isQuoteAssetExcess;
+    }
+
+    /**
+     * @dev Retrieves the price adapter address for a component after verifying its existence
+     * in the IntegrationRegistry. This function ensures the validity of the adapter during a bid.
+     *
+     * @param _setToken        Instance of the SetToken to be rebalanced.
+     * @param _component       Component whose price adapter is to be fetched.
+     *
+     * @return IAuctionPriceAdapter    The price adapter's address.
+     */
+    function _getAuctionPriceAdapter(
+        ISetToken _setToken,
+        IERC20 _component
     )
         internal
         view
-        returns (uint256, uint256, uint256, uint256)
-    {
-        uint256 currentUnit = _getDefaultPositionRealUnit(_setToken, _component);
-        uint256 targetUnit = _getNormalizedTargetUnit(_setToken, _component);
-
-        return (
-            currentUnit,
-            targetUnit,
-            _totalSupply.getDefaultTotalNotional(currentUnit),
-            _totalSupply.preciseMulCeil(targetUnit)
-        );
-    }
-
-    /**
-     * @dev Gets price adapter address for a component after checking that it exists in the
-     * IntegrationRegistry. This method is called during a bid and must validate the adapter
-     * because its state may have changed since it was set in a separate transaction.
-     *
-     * @param _setToken                         Instance of the SetToken to be rebalanced
-     * @param _component                        IERC20 component whose price adapter is fetched
-     *
-     * @return IAuctionPriceAdapter                 Adapter address
-     */
-    function _getAuctionPriceAdapter(
-        ISetToken _setToken, 
-        IERC20 _component
-    ) 
-        internal 
-        view 
-        returns(IAuctionPriceAdapterV1) 
+        returns(IAuctionPriceAdapterV1)
     {
         return IAuctionPriceAdapterV1(getAndValidateAdapter(executionInfo[_setToken][_component].priceAdapterName));
     }
 
     /**
-     * @dev Check if all targets are met.
+     * @dev Concatenates two arrays of AuctionExecutionParams after validating them.
      *
-     * @param _setToken             Instance of the SetToken to be rebalanced
-     *
-     * @return bool                 True if all component's target units have been met, otherwise false
+     * @param _oldAuctionParams     The first array of AuctionExecutionParams.
+     * @param _newAuctionParams     The second array of AuctionExecutionParams.
+     * @return concatenatedParams   The concatenated array of AuctionExecutionParams.
      */
-    function _allTargetsMet(ISetToken _setToken) internal view returns (bool) {
-        address[] memory rebalanceComponents = rebalanceInfo[_setToken].rebalanceComponents;
+    function _concatAndValidateAuctionParams(
+        AuctionExecutionParams[] memory _oldAuctionParams,
+        AuctionExecutionParams[] memory _newAuctionParams
+    )
+        internal
+        view
+        returns (AuctionExecutionParams[] memory concatenatedParams)
+    {
+        uint256 oldLength = _oldAuctionParams.length;
+        uint256 newLength = _newAuctionParams.length;
 
-        for (uint256 i = 0; i < rebalanceComponents.length; i++) {
-            if (_targetUnmet(_setToken, rebalanceComponents[i])) { return false; }
+        // Initialize the concatenated array with the combined size of the input arrays
+        concatenatedParams = new AuctionExecutionParams[](oldLength + newLength);
+
+        // Copy and validate the old auction params
+        for (uint256 i = 0; i < oldLength; i++) {
+            _validateAuctionExecutionPriceParams(_oldAuctionParams[i]);
+            concatenatedParams[i] = _oldAuctionParams[i];
         }
-        return true;
+
+        // Append and validate the new auction params
+        for (uint256 j = 0; j < newLength; j++) {
+            require(_newAuctionParams[j].targetUnit > 0, "New component target unit must be greater than 0");
+            _validateAuctionExecutionPriceParams(_newAuctionParams[j]);
+            concatenatedParams[oldLength + j] = _newAuctionParams[j];
+        }
+
+        return concatenatedParams;
     }
 
     /**
-     * @dev Determines if a target is met. Due to small rounding errors converting between virtual and
-     * real unit on SetToken we allow for a 1 wei buffer when checking if target is met. In order to
-     * avoid subtraction overflow errors targetUnits of zero check for an exact amount. WETH is not
-     * checked as it is allowed to float around its target.
+     * @dev Validates the given auction execution price adapter params.
      *
-     * @param _setToken                         Instance of the SetToken to be rebalanced
-     * @param _component                        Component whose target is evaluated
-     *
-     * @return bool                             True if component's target units are met, false otherwise
+     * @param auctionParams The auction parameters to validate.
      */
-    function _targetUnmet(
-        ISetToken _setToken, 
-        address _component
-    ) 
-        internal 
-        view 
-        returns(bool) 
-    {
-        if (_component == address(weth)) return false;
-
-        uint256 normalizedTargetUnit = _getNormalizedTargetUnit(_setToken, IERC20(_component));
-        uint256 currentUnit = _getDefaultPositionRealUnit(_setToken, IERC20(_component));
-
-        return (normalizedTargetUnit > 0)
-            ? !(normalizedTargetUnit.approximatelyEquals(currentUnit, 1))
-            : normalizedTargetUnit != currentUnit;
-    }
-
-    /**
-     * @dev Get the SetToken's default position as uint256
-     *
-     * @param _setToken         Instance of the SetToken
-     * @param _component        IERC20 component to fetch the default position for
-     *
-     * return uint256           Real unit position
-     */
-    function _getDefaultPositionRealUnit(
-        ISetToken _setToken, 
-        IERC20 _component
-    ) 
-        internal 
-        view 
-        returns (uint256) 
-    {
-        return _setToken.getDefaultPositionRealUnit(address(_component)).toUint256();
-    }
-
-    /**
-     * @dev Calculates and returns the normalized target unit value.
-     *
-     * @param _setToken             Instance of the SetToken
-     * @param _component            IERC20 component whose normalized target unit is required
-     *
-     * @return uint256                          Normalized target unit of the component
-     */
-    function _getNormalizedTargetUnit(
-        ISetToken _setToken, 
-        IERC20 _component
-    ) 
-        internal 
-        view 
-        returns(uint256) 
-    {
-        // (targetUnit * current position multiplier) / position multiplier when rebalance started
-        return executionInfo[_setToken][_component]
-            .targetUnit
-            .mul(_setToken.positionMultiplier().toUint256())
-            .div(rebalanceInfo[_setToken].positionMultiplier);
+    function _validateAuctionExecutionPriceParams(AuctionExecutionParams memory auctionParams) internal view {
+        IAuctionPriceAdapterV1 adapter = IAuctionPriceAdapterV1(getAndValidateAdapter(auctionParams.priceAdapterName));
+        require(adapter.isPriceAdapterConfigDataValid(auctionParams.priceAdapterConfigData), "Price adapter config data invalid");
     }
 
     /* ============== Modifier Helpers ===============

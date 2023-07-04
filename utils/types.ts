@@ -48,5 +48,5 @@ export interface CustomOracleNAVIssuanceSettings {
 export interface AuctionExecutionParams {
   targetUnit: BigNumber;
   priceAdapterName: string;
-  priceAdapterData: Bytes;
+  priceAdapterConfigData: Bytes;
 }

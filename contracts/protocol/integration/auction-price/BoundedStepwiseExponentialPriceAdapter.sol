@@ -18,20 +18,19 @@
 pragma solidity 0.6.10;
 
 import { Math } from "@openzeppelin/contracts/math/Math.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/SafeCast.sol";
 import { SafeMath } from "@openzeppelin/contracts/math/SafeMath.sol";
-import { PreciseUnitMath } from "../../../lib/PreciseUnitMath.sol";
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ISetToken } from "../../../interfaces/ISetToken.sol";
 import { IAuctionPriceAdapterV1 } from "../../../interfaces/IAuctionPriceAdapterV1.sol";
+import { PreciseUnitMath } from "../../../lib/PreciseUnitMath.sol";
 
 /**
  * @title BoundedStepwiseExponentialPriceAdapter
  * @author Index Coop
- * @notice Price adapter for the AuctionRebalanceModuleV1 that implements a 
- * price curve that increases/decreases exponentially in steps over time
- * within a bounded range.
+ * @notice Price adapter contract for the AuctionRebalanceModuleV1, returns a price that
+ * increases or decreases exponentially in steps over time, within a bounded range.
  */
 contract BoundedStepwiseExponentialPriceAdapter is IAuctionPriceAdapterV1 {
     using SafeCast for int256;
@@ -40,19 +39,20 @@ contract BoundedStepwiseExponentialPriceAdapter is IAuctionPriceAdapterV1 {
     using Math for uint256;
 
     /**
-     * @dev Returns the price based on the timeElapsed and price curve
-     * parameters decoded from the priceAdapterData
-     * 
-     * @param timeElapsed          Time elapsed since start of auction
-     * @param priceAdapterData     Bytes encoded auction parameters
+     * @dev Calculates and returns the exponential price.
+     *
+     * @param _timeElapsed Time elapsed since the start of the auction.
+     * @param _priceAdapterConfigData Encoded bytes representing the exponential function parameters.
+     *
+     * @return price The price calculated using the exponential function.
      */
     function getPrice(
-        ISetToken /* setToken */,
-        IERC20 /* component */,
-        uint256 /* componentQuantity */,
-        uint256 timeElapsed,
-        uint256 /*  duration */,
-        bytes memory priceAdapterData
+        ISetToken /* _setToken */,
+        IERC20 /* _component */,
+        uint256 /* _componentQuantity */,
+        uint256 _timeElapsed,
+        uint256 /* _duration */,
+        bytes memory _priceAdapterConfigData
     )
         external
         view
@@ -66,16 +66,47 @@ contract BoundedStepwiseExponentialPriceAdapter is IAuctionPriceAdapterV1 {
             bool isDecreasing,
             uint256 maxPrice,
             uint256 minPrice
-        ) = _getDecodedData(priceAdapterData);
+        ) = _getDecodedData(_priceAdapterConfigData);
 
-        uint256 bucket = timeElapsed.div(bucketSize);
+        uint256 bucket = _timeElapsed.div(bucketSize);
         uint256 priceChange = PreciseUnitMath.safePower(bucketFactor, bucket);
 
         price = isDecreasing
             ? initialPrice.sub(priceChange)
             : initialPrice.add(priceChange);
-
+        
         price = price.max(minPrice).min(maxPrice);
+    }
+
+    /**
+     * @dev Returns true if the price adapter is valid for the given parameters.
+     * 
+     * @param _priceAdapterConfigData   Encoded data for configuring the price adapter.
+     * 
+     * @return isValid                  Boolean indicating if the adapter config data is valid.
+     */
+    function isPriceAdapterConfigDataValid(
+        bytes memory _priceAdapterConfigData
+    )
+        external
+        view
+        override
+        returns (bool isValid)
+    {
+        (
+            uint256 initialPrice,
+            ,
+            uint256 bucketSize,
+            ,
+            uint256 maxPrice,
+            uint256 minPrice
+        ) = _getDecodedData(_priceAdapterConfigData);
+
+        isValid = initialPrice > 0 &&
+            bucketSize > 0 &&
+            maxPrice > 0 &&
+            bucketSize > 0 &&
+            maxPrice >= minPrice;
     }
 
     /**
@@ -88,7 +119,7 @@ contract BoundedStepwiseExponentialPriceAdapter is IAuctionPriceAdapterV1 {
     )
         external
         pure
-        returns (uint256, uint256, uint256, bool, uint256, uint256)
+        returns (uint256 initialPrice, uint256 bucketFactor, uint256 bucketSize, bool isDecreasing, uint256 maxPrice, uint256 minPrice)
     {
         return _getDecodedData(_data);
     }
@@ -113,7 +144,7 @@ contract BoundedStepwiseExponentialPriceAdapter is IAuctionPriceAdapterV1 {
     )
         external 
         pure
-        returns (bytes memory) 
+        returns (bytes memory data) 
     {
         return abi.encode(_initialPrice, _bucketFactor, _bucketSize, _isDecreasing, _maxPrice, _minPrice);
     }
@@ -128,7 +159,7 @@ contract BoundedStepwiseExponentialPriceAdapter is IAuctionPriceAdapterV1 {
     )
         internal 
         pure 
-        returns (uint256, uint256, uint256, bool, uint256, uint256) 
+        returns (uint256 initialPrice, uint256 bucketFactor, uint256 bucketSize, bool isDecreasing, uint256 maxPrice, uint256 minPrice)
     {
         return abi.decode(_data, (uint256, uint256, uint256, bool, uint256, uint256));
     }
