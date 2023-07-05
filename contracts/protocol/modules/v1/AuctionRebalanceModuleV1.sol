@@ -800,8 +800,8 @@ contract AuctionRebalanceModuleV1 is ModuleBase, ReentrancyGuard {
 
         // Retrieve the current price for the component.
         bidInfo.componentPrice = bidInfo.priceAdapter.getPrice(
-            _setToken,
-            _component,
+            address(_setToken),
+            address(_component),
             _componentQuantity,
             block.timestamp.sub(rebalanceInfo[_setToken].rebalanceStartTime),
             rebalanceInfo[_setToken].rebalanceDuration,

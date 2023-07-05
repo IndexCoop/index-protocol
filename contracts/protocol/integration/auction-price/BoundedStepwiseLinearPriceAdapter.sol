@@ -1,41 +1,17 @@
-/*
-    Copyright 2023 Index Coop
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity 0.8.17;
 
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
-
-    SPDX-License-Identifier: Apache License, Version 2.0
-*/
-pragma solidity 0.6.10;
-
-import { Math } from "@openzeppelin/contracts/math/Math.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SafeCast } from "@openzeppelin/contracts/utils/SafeCast.sol";
-import { SafeMath } from "@openzeppelin/contracts/math/SafeMath.sol";
-
-import { ISetToken } from "../../../interfaces/ISetToken.sol";
-import { IAuctionPriceAdapterV1 } from "../../../interfaces/IAuctionPriceAdapterV1.sol";
+import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
 
 /**
  * @title BoundedStepwiseLinearPriceAdapter
  * @author Index Coop
- * @notice Price adapter contract for the AuctionRebalanceModuleV1, returns a price that
+ * @notice Price adapter contract for the AuctionRebalanceModuleV1. It returns a price that
  * increases or decreases linearly in steps over time, within a bounded range.
+ * The rate of change is constant.
+ * price = initialPrice +/- coefficient * bucket
  */
-contract BoundedStepwiseLinearPriceAdapter is IAuctionPriceAdapterV1 {
-    using SafeCast for int256;
-    using SafeCast for uint256;
-    using SafeMath for uint256;
-    using Math for uint256;
+contract BoundedStepwiseLinearPriceAdapter {
 
     /**
      * @dev Calculates and returns the linear price.
@@ -46,16 +22,15 @@ contract BoundedStepwiseLinearPriceAdapter is IAuctionPriceAdapterV1 {
      * @return price                    The price calculated using the linear function.
      */
     function getPrice(
-        ISetToken /* _setToken */,
-        IERC20 /* _component */,
+        address /* _setToken */,
+        address /* _component */,
         uint256 /* _componentQuantity */,
         uint256 _timeElapsed,
         uint256 /* _duration */,
         bytes memory _priceAdapterConfigData
     )
         external
-        view
-        override
+        pure
         returns (uint256 price)
     {
         (
@@ -65,16 +40,35 @@ contract BoundedStepwiseLinearPriceAdapter is IAuctionPriceAdapterV1 {
             bool isDecreasing,
             uint256 maxPrice,
             uint256 minPrice
-        ) = _getDecodedData(_priceAdapterConfigData);
+        ) = getDecodedData(_priceAdapterConfigData);
 
-        uint256 bucket = _timeElapsed.div(bucketSize);
-        uint256 priceChange = slope.mul(bucket);
+        require(
+            areParamsValid(initialPrice, slope, bucketSize, isDecreasing, maxPrice, minPrice), 
+            "BoundedStepwiseLinearPriceAdapter: Invalid params"
+        );
 
-        price = isDecreasing
-            ? initialPrice.sub(priceChange)
-            : initialPrice.add(priceChange);
+        uint256 bucket = _timeElapsed / bucketSize;
 
-        price = price.max(minPrice).min(maxPrice);
+        // Protect against priceChange overflow
+        if (bucket > type(uint256).max / slope) {
+            return isDecreasing ? minPrice : maxPrice;
+        }
+
+        uint256 priceChange = bucket * slope;
+
+        if (isDecreasing) {
+            // Protect against price underflow
+            if (priceChange > initialPrice) {
+                return minPrice;
+            }
+            return FixedPointMathLib.max(initialPrice - priceChange, minPrice);
+        } else {
+            // Protect against price overflow
+            if (priceChange > type(uint256).max - initialPrice) {
+                return maxPrice;
+            }
+            return FixedPointMathLib.min(initialPrice + priceChange, maxPrice);
+        }
     }
 
     /**
@@ -88,39 +82,46 @@ contract BoundedStepwiseLinearPriceAdapter is IAuctionPriceAdapterV1 {
         bytes memory _priceAdapterConfigData
     )
         external
-        view
-        override
+        pure
         returns (bool isValid)
     {
         (
             uint256 initialPrice,
-            ,
+            uint256 slope,
             uint256 bucketSize,
-            ,
+            bool isDecreasing,
             uint256 maxPrice,
             uint256 minPrice
-        ) = _getDecodedData(_priceAdapterConfigData);
+        ) = getDecodedData(_priceAdapterConfigData);
 
-        isValid = initialPrice > 0 &&
-            bucketSize > 0 &&
-            maxPrice > 0 &&
-            bucketSize > 0 &&
-            maxPrice >= minPrice;
+        return areParamsValid(initialPrice, slope, bucketSize, isDecreasing, maxPrice, minPrice);
     }
 
     /**
-     * @dev Returns the auction parameters decoded from bytes
+     * @dev Returns true if the price adapter parameters are valid.
      * 
-     * @param _data     Bytes encoded auction parameters
+     * @param _initialPrice      Initial price of the auction
+     * @param _bucketSize        Time elapsed between each bucket
+     * @param _maxPrice          Maximum price of the auction
+     * @param _minPrice          Minimum price of the auction
      */
-    function getDecodedData(
-        bytes memory _data
+    function areParamsValid(
+        uint256 _initialPrice,
+        uint256 _slope,
+        uint256 _bucketSize,
+        bool /* _isDecreasing */,
+        uint256 _maxPrice,
+        uint256 _minPrice
     )
-        external
+        public
         pure
-        returns (uint256 initialPrice, uint256 slope, uint256 bucketSize, bool isDecreasing, uint256 maxPrice, uint256 minPrice)
+        returns (bool)
     {
-        return _getDecodedData(_data);
+        return _initialPrice > 0
+            && _slope > 0
+            && _bucketSize > 0
+            && _initialPrice <= _maxPrice
+            && _initialPrice >= _minPrice;
     }
 
     /**
@@ -149,14 +150,18 @@ contract BoundedStepwiseLinearPriceAdapter is IAuctionPriceAdapterV1 {
     }
 
     /**
-     * @dev Helper to decode auction parameters from bytes
-     * 
-     * @param _data     Bytes encoded auction parameters
+     * @dev Decodes the parameters from the provided bytes.
+     *
+     * @param _data           Bytes encoded auction parameters
+     * @return initialPrice   Initial price of the auction
+     * @return slope          Slope of the linear price change
+     * @return bucketSize     Time elapsed between each bucket
+     * @return isDecreasing   Flag for whether the price is decreasing or increasing
+     * @return maxPrice       Maximum price of the auction
+     * @return minPrice       Minimum price of the auction
      */
-    function _getDecodedData(
-        bytes memory _data
-    )
-        internal
+    function getDecodedData(bytes memory _data)
+        public
         pure
         returns (uint256 initialPrice, uint256 slope, uint256 bucketSize, bool isDecreasing, uint256 maxPrice, uint256 minPrice)
     {

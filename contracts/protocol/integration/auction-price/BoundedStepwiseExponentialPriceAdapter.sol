@@ -1,81 +1,90 @@
-/*
-    Copyright 2023 Index Coop
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity 0.8.17;
 
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
-
-    SPDX-License-Identifier: Apache License, Version 2.0
-*/
-pragma solidity 0.6.10;
-
-import { Math } from "@openzeppelin/contracts/math/Math.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SafeCast } from "@openzeppelin/contracts/utils/SafeCast.sol";
-import { SafeMath } from "@openzeppelin/contracts/math/SafeMath.sol";
-
-import { ISetToken } from "../../../interfaces/ISetToken.sol";
-import { IAuctionPriceAdapterV1 } from "../../../interfaces/IAuctionPriceAdapterV1.sol";
-import { PreciseUnitMath } from "../../../lib/PreciseUnitMath.sol";
+import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
 
 /**
  * @title BoundedStepwiseExponentialPriceAdapter
  * @author Index Coop
- * @notice Price adapter contract for the AuctionRebalanceModuleV1, returns a price that
+ * @notice Price adapter contract for the AuctionRebalanceModuleV1. It returns a price that
  * increases or decreases exponentially in steps over time, within a bounded range.
+ * Rate of change is increasing.
+ * price = initialPrice +/- coefficient * e ^ (exponent * bucket)
  */
-contract BoundedStepwiseExponentialPriceAdapter is IAuctionPriceAdapterV1 {
-    using SafeCast for int256;
-    using SafeCast for uint256;
-    using SafeMath for uint256;
-    using Math for uint256;
+contract BoundedStepwiseExponentialPriceAdapter {
+    using FixedPointMathLib for int256;
+
+    uint256 constant WAD = 1e18;
+    int256 constant MAX_EXP_ARG = 100e18;
 
     /**
      * @dev Calculates and returns the exponential price.
      *
-     * @param _timeElapsed Time elapsed since the start of the auction.
-     * @param _priceAdapterConfigData Encoded bytes representing the exponential function parameters.
+     * @param _timeElapsed              Time elapsed since the start of the auction.
+     * @param _priceAdapterConfigData   Encoded bytes representing the exponential function parameters.
      *
-     * @return price The price calculated using the exponential function.
+     * @return price                    The price calculated using the exponential function.
      */
     function getPrice(
-        ISetToken /* _setToken */,
-        IERC20 /* _component */,
+        address /* _setToken */,
+        address /* _component */,
         uint256 /* _componentQuantity */,
         uint256 _timeElapsed,
         uint256 /* _duration */,
         bytes memory _priceAdapterConfigData
     )
         external
-        view
-        override
+        pure
         returns (uint256 price)
     {
         (
             uint256 initialPrice,
-            uint256 bucketFactor,
+            uint256 coefficient,
+            uint256 exponent,
             uint256 bucketSize,
             bool isDecreasing,
             uint256 maxPrice,
             uint256 minPrice
-        ) = _getDecodedData(_priceAdapterConfigData);
+        ) = getDecodedData(_priceAdapterConfigData);
 
-        uint256 bucket = _timeElapsed.div(bucketSize);
-        uint256 priceChange = PreciseUnitMath.safePower(bucketFactor, bucket);
+        require(
+            areParamsValid(initialPrice, coefficient, exponent, bucketSize, isDecreasing, maxPrice, minPrice), 
+            "BoundedStepwiseExponentialPriceAdapter: Invalid params"
+        );
 
-        price = isDecreasing
-            ? initialPrice.sub(priceChange)
-            : initialPrice.add(priceChange);
+        uint256 bucket = _timeElapsed / bucketSize;
+
+        // Protect against exponential argument overflow
+        if (bucket > type(uint256).max / exponent) {
+            return _getBoundaryPrice(isDecreasing, maxPrice, minPrice);
+        }
+        int256 expArgument = int256(bucket * exponent);
         
-        price = price.max(minPrice).min(maxPrice);
+        // Protect against exponential overflow and increasing relative error
+        if (expArgument > MAX_EXP_ARG) {
+            return _getBoundaryPrice(isDecreasing, maxPrice, minPrice);
+        }
+        uint256 expExpression = uint256(FixedPointMathLib.expWad(expArgument));
+
+        // Protect against priceChange overflow
+        if (coefficient > type(uint256).max / expExpression) {
+            return _getBoundaryPrice(isDecreasing, maxPrice, minPrice);
+        }
+        uint256 priceChange = coefficient * expExpression - WAD;
+
+        if (isDecreasing) {
+            // Protect against price underflow
+            if (priceChange > initialPrice) {
+                return minPrice;
+            }
+            return FixedPointMathLib.max(initialPrice - priceChange , minPrice);
+        } else {
+            // Protect against price overflow
+            if (priceChange > type(uint256).max - initialPrice) {
+                return maxPrice;
+            }
+            return FixedPointMathLib.min(initialPrice + priceChange, maxPrice);
+        }
     }
 
     /**
@@ -89,78 +98,101 @@ contract BoundedStepwiseExponentialPriceAdapter is IAuctionPriceAdapterV1 {
         bytes memory _priceAdapterConfigData
     )
         external
-        view
-        override
+        pure
         returns (bool isValid)
     {
         (
             uint256 initialPrice,
-            ,
+            uint256 coefficient,
+            uint256 exponent,
             uint256 bucketSize,
-            ,
+            bool isDecreasing,
             uint256 maxPrice,
             uint256 minPrice
-        ) = _getDecodedData(_priceAdapterConfigData);
+        ) = getDecodedData(_priceAdapterConfigData);
 
-        isValid = initialPrice > 0 &&
-            bucketSize > 0 &&
-            maxPrice > 0 &&
-            bucketSize > 0 &&
-            maxPrice >= minPrice;
+        return areParamsValid(initialPrice, coefficient, exponent, bucketSize, isDecreasing, maxPrice, minPrice);
     }
 
     /**
-     * @dev Returns the auction parameters decoded from bytes
+     * @dev Returns true if the price adapter parameters are valid.
      * 
-     * @param _data     Bytes encoded auction parameters
+     * @param _initialPrice      Initial price of the auction
+     * @param _coefficent        Scaling factor for exponential expression
+     * @param _exponent          Exponent factor for exponential expression
+     * @param _bucketSize        Time elapsed between each bucket
+     * @param _maxPrice          Maximum price of the auction
+     * @param _minPrice          Minimum price of the auction
      */
-    function getDecodedData(
-        bytes memory _data
+    function areParamsValid(
+        uint256 _initialPrice,
+        uint256 _coefficent,
+        uint256 _exponent,
+        uint256 _bucketSize,
+        bool /* _isDecreasing */,
+        uint256 _maxPrice,
+        uint256 _minPrice
     )
-        external
+        public
         pure
-        returns (uint256 initialPrice, uint256 bucketFactor, uint256 bucketSize, bool isDecreasing, uint256 maxPrice, uint256 minPrice)
+        returns (bool)
     {
-        return _getDecodedData(_data);
+        return _initialPrice > 0
+            && _coefficent > 0
+            && _exponent > 0
+            && _bucketSize > 0
+            && _initialPrice <= _maxPrice
+            && _initialPrice >= _minPrice;
     }
 
     /**
      * @dev Returns the encoded data for the price curve parameters
      * 
-     * @param _initialPrice      Initial price of the auction
-     * @param _bucketFactor      Factor for the exponential price change each bucket
-     * @param _bucketSize        Time elapsed between each bucket
-     * @param _isDecreasing      Flag for whether the price is decreasing or increasing
-     * @param _maxPrice          Maximum price of the auction
-     * @param _minPrice          Minimum price of the auction
+     * @param _initialPrice        Initial price of the auction
+     * @param _coefficent          Scaling factor for exponential expression
+     * @param _exponent            Exponent factor for exponential expression
+     * @param _bucketSize          Time elapsed between each bucket
+     * @param _isDecreasing        Flag for whether the price is decreasing or increasing
+     * @param _maxPrice            Maximum price of the auction
+     * @param _minPrice            Minimum price of the auction
      */
     function getEncodedData(
         uint256 _initialPrice,
-        uint256 _bucketFactor,
+        uint256 _coefficent,
+        uint256 _exponent,
         uint256 _bucketSize,
         bool _isDecreasing,
         uint256 _maxPrice,
         uint256 _minPrice
     )
-        external 
+        external
         pure
-        returns (bytes memory data) 
+        returns (bytes memory data)
     {
-        return abi.encode(_initialPrice, _bucketFactor, _bucketSize, _isDecreasing, _maxPrice, _minPrice);
+        return abi.encode(_initialPrice, _coefficent, _exponent, _bucketSize, _isDecreasing, _maxPrice, _minPrice);
     }
 
     /**
-     * @dev Helper to decode auction parameters from bytes
-     * 
-     * @param _data     Bytes encoded auction parameters
+     * @dev Decodes the parameters from the provided bytes.
+     *
+     * @param _data                Bytes encoded auction parameters
+     * @return initialPrice        Initial price of the auction
+     * @return coefficient         Scaling factor for exponential expression
+     * @return exponent            Exponent factor for exponential expression
+     * @return bucketSize          Time elapsed between each bucket
+     * @return isDecreasing        Flag for whether the price is decreasing or increasing
+     * @return maxPrice            Maximum price of the auction
+     * @return minPrice            Minimum price of the auction
      */
-    function _getDecodedData(
-        bytes memory _data
-    )
-        internal 
-        pure 
-        returns (uint256 initialPrice, uint256 bucketFactor, uint256 bucketSize, bool isDecreasing, uint256 maxPrice, uint256 minPrice)
+    function getDecodedData(bytes memory _data)
+        public
+        pure
+        returns (uint256 initialPrice, uint256 coefficient, uint256 exponent, uint256 bucketSize, bool isDecreasing, uint256 maxPrice, uint256 minPrice)
     {
-        return abi.decode(_data, (uint256, uint256, uint256, bool, uint256, uint256));
+        return abi.decode(_data, (uint256, uint256, uint256, uint256, bool, uint256, uint256));
+    }
+
+    function _getBoundaryPrice(bool isDecreasing, uint256 maxPrice, uint256 minPrice) private pure returns (uint256) {
+        return isDecreasing ? minPrice : maxPrice;
     }
 }

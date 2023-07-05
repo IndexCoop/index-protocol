@@ -36,7 +36,7 @@ import { ContractTransaction } from "ethers";
 
 const expect = getWaffleExpect();
 
-describe("AuctionRebalanceModuleV1", () => {
+describe.only("AuctionRebalanceModuleV1", () => {
   let owner: Account;
   let bidder: Account;
   let positionModule: Account;
@@ -2695,8 +2695,9 @@ describe("AuctionRebalanceModuleV1", () => {
 
         beforeEach(async () => {
           const daiExponentialCurveParams = await boundedStepwiseExponentialPriceAdapter.getEncodedData(
-            ether(0.00055),
-            ether(0.00005),
+            ether(0.0005),
+            1,
+            ether(0.00001),
             ONE_HOUR_IN_SECONDS,
             true,
             ether(0.00055),
@@ -2705,8 +2706,9 @@ describe("AuctionRebalanceModuleV1", () => {
 
           const wbtcPerWethDecimalFactor = ether(1).div(bitcoin(1));
           const wbtcExponentialCurveParams = await boundedStepwiseExponentialPriceAdapter.getEncodedData(
-            ether(14).mul(wbtcPerWethDecimalFactor),
-            ether(0.5).mul(wbtcPerWethDecimalFactor),
+            ether(14.5).mul(wbtcPerWethDecimalFactor),
+            1,
+            ether(0.1).mul(wbtcPerWethDecimalFactor),
             ONE_HOUR_IN_SECONDS,
             false,
             ether(15).mul(wbtcPerWethDecimalFactor),
@@ -2715,7 +2717,8 @@ describe("AuctionRebalanceModuleV1", () => {
 
           const wethExponentialCurveParams = await boundedStepwiseExponentialPriceAdapter.getEncodedData(
             ether(1),
-            0,
+            1,
+            ether(0.1),
             ONE_HOUR_IN_SECONDS,
             false,
             ether(1),
@@ -2750,6 +2753,8 @@ describe("AuctionRebalanceModuleV1", () => {
             defaultDuration,
             defaultPositionMultiplier
           );
+
+          subjectIncreaseTime = ZERO;
         });
 
 

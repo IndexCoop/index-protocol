@@ -1,97 +1,57 @@
-/*
-    Copyright 2023 Index Coop
-
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
-
-    SPDX-License-Identifier: Apache License, Version 2.0
-*/
-pragma solidity 0.6.10;
-
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SafeCast } from "@openzeppelin/contracts/utils/SafeCast.sol";
-import { SafeMath } from "@openzeppelin/contracts/math/SafeMath.sol";
-
-import { ISetToken } from "../../../interfaces/ISetToken.sol";
-import { IAuctionPriceAdapterV1 } from "../../../interfaces/IAuctionPriceAdapterV1.sol";
-import { PreciseUnitMath } from "../../../lib/PreciseUnitMath.sol";
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity 0.8.17;
 
 /**
  * @title ConstantPriceAdapter
  * @author Index Coop
- * @notice Price adapter contract for AuctionRebalanceModuleV1, returns a constant price.
+ * @notice Price adapter contract for AuctionRebalanceModuleV1 that returns a constant price.
  */
-contract ConstantPriceAdapter is IAuctionPriceAdapterV1 {
-    using SafeCast for uint256;
-    using SafeMath for uint256;
-
+contract ConstantPriceAdapter {
     /**
      * @dev Calculates and returns the constant price.
      *
      * @param _priceAdapterConfigData   Encoded bytes representing the constant price.
      *
-     * @return price                    The constant price decoded from _priceAdapterData.
+     * @return price                    The constant price decoded from _priceAdapterConfigData.
      */
     function getPrice(
-        ISetToken /* _setToken */,
-        IERC20 /* _component */,
+        address /* _setToken */,
+        address /* _component */,
         uint256 /* _componentQuantity */,
         uint256 /* _timeElapsed */,
         uint256 /* _duration */,
         bytes memory _priceAdapterConfigData
     )
         external
-        view
-        override
+        pure
         returns (uint256 price)
     {
-        price = _getDecodedData(_priceAdapterConfigData);
+        price = getDecodedData(_priceAdapterConfigData);
+        require(price > 0, "ConstantPriceAdapter: Price must be greater than 0");
     }
 
     /**
-     * @dev Returns true if the price adapter is valid for the given parameters.
+     * @notice Returns true if the price adapter configuration data is valid.
      * 
-     * @param _priceAdapterConfigData   Encoded data for configuring the price adapter.
+     * @param _priceAdapterConfigData   Encoded bytes representing the constant price.
      * 
-     * @return isValid                  Boolean indicating if the adapter config data is valid.
+     * @return isValid                  True if the constant price is greater than 0, False otherwise.
      */
     function isPriceAdapterConfigDataValid(
         bytes memory _priceAdapterConfigData
     )
         external
-        view
-        override
+        pure
         returns (bool isValid)
     {
-        uint256 price = _getDecodedData(_priceAdapterConfigData);
-
+        uint256 price = getDecodedData(_priceAdapterConfigData);
         isValid = price > 0;
     }
 
     /**
-     * @dev Decodes the constant price from the provided bytes.
+     * @notice Encodes the constant price into bytes.
      *
-     * @param _data  Encoded bytes representing the constant price.
-     *
-     * @return       The constant price decoded from bytes.
-     */
-    function getDecodedData(bytes memory _data) external pure returns (uint256) {
-        return _getDecodedData(_data);
-    }
-
-    /**
-     * @dev Encodes the constant price into bytes.
-     *
-     * @param _price  The constant price.
+     * @param _price  The constant price in base units.
      *
      * @return        Encoded bytes representing the constant price.
      */
@@ -100,13 +60,13 @@ contract ConstantPriceAdapter is IAuctionPriceAdapterV1 {
     }
 
     /**
-     * @dev Helper function to decode the constant price from bytes.
+     * @dev Decodes the constant price from the provided bytes.
      *
      * @param _data  Encoded bytes representing the constant price.
      *
-     * @return       The constant price decoded from bytes.
+     * @return       The constant price decoded from bytes in base units.
      */
-    function _getDecodedData(bytes memory _data) internal pure returns (uint256) {
+    function getDecodedData(bytes memory _data) public pure returns (uint256) {
         return abi.decode(_data, (uint256));
     }
 }
