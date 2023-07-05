@@ -12,6 +12,7 @@ export { AmmModule } from "../../typechain/AmmModule";
 export { AssetLimitHook } from "../../typechain/AssetLimitHook";
 export { AuctionRebalanceModuleV1 } from "../../typechain/AuctionRebalanceModuleV1";
 export { BalancerV1IndexExchangeAdapter } from "../../typechain/BalancerV1IndexExchangeAdapter";
+export { BalancerV2ExchangeAdapter } from "../../typechain/BalancerV2ExchangeAdapter";
 export { BasicIssuanceModule } from "../../typechain/BasicIssuanceModule";
 export { BoundedStepwiseExponentialPriceAdapter } from "../../typechain/BoundedStepwiseExponentialPriceAdapter";
 export { BoundedStepwiseLinearPriceAdapter } from "../../typechain/BoundedStepwiseLinearPriceAdapter";
