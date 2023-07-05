@@ -27,7 +27,7 @@ import { SystemFixture } from "@utils/fixtures";
 
 const expect = getWaffleExpect();
 
-describe.only("BoundedStepwiseLinearPriceAdapter", () => {
+describe("BoundedStepwiseLinearPriceAdapter", () => {
   let owner: Account;
   let deployer: DeployHelper;
   let setup: SystemFixture;
@@ -224,7 +224,7 @@ describe.only("BoundedStepwiseLinearPriceAdapter", () => {
 
     describe("when it is not decreasing and the price computation will overflow", async () => {
       beforeEach(async () => {
-        subjectSlope = subjectInitialPrice;
+        subjectSlope = MAX_UINT_256;
         subjectIsDecreasing = false;
         subjectMaxPrice = ether(110);
         subjectMinPrice = ether(100);
@@ -237,7 +237,7 @@ describe.only("BoundedStepwiseLinearPriceAdapter", () => {
           subjectMinPrice
         );
 
-        subjectIncreaseTime = ONE_HOUR_IN_SECONDS.mul(2);
+        subjectIncreaseTime = ONE_HOUR_IN_SECONDS.mul(1);
       });
 
       it("should return the max price", async () => {

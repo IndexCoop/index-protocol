@@ -26,7 +26,7 @@ import { SystemFixture } from "@utils/fixtures";
 
 const expect = getWaffleExpect();
 
-describe.only("BoundedStepwiseExponentialPriceAdapter", () => {
+describe("BoundedStepwiseExponentialPriceAdapter", () => {
   let owner: Account;
   let deployer: DeployHelper;
   let setup: SystemFixture;
@@ -205,6 +205,52 @@ describe.only("BoundedStepwiseExponentialPriceAdapter", () => {
 
     });
 
+    describe("when the computation for price change will overflow", async () => {
+      beforeEach(async () => {
+        subjectPriceAdapterConfigData = await boundedStepwiseExponentialPriceAdapter.getEncodedData(
+          subjectInitialPrice,
+          MAX_UINT_256,
+          subjectExponent,
+          subjectBucketSize,
+          subjectIsDecreasing,
+          subjectMaxPrice,
+          subjectMinPrice
+        );
+
+        subjectIncreaseTime = ONE_HOUR_IN_SECONDS.mul(2);
+      });
+
+      it("should return the min price if it was decreasing", async () => {
+        const returnedPrice = await subject();
+
+        expect(returnedPrice).to.eq(subjectMinPrice);
+      });
+
+      describe("when it was not decreasing", async () => {
+        beforeEach(async () => {
+          subjectIsDecreasing = false;
+          subjectMaxPrice = ether(110);
+          subjectMinPrice = ether(100);
+          subjectPriceAdapterConfigData = await boundedStepwiseExponentialPriceAdapter.getEncodedData(
+            subjectInitialPrice,
+            MAX_UINT_256,
+            subjectExponent,
+            subjectBucketSize,
+            subjectIsDecreasing,
+            subjectMaxPrice,
+            subjectMinPrice
+          );
+        });
+
+        it("should return the max price", async () => {
+          const returnedPrice = await subject();
+
+          expect(returnedPrice).to.eq(subjectMaxPrice);
+        });
+      });
+
+    });
+
     describe("when it is decreasing and the price computation will underflow", async () => {
       beforeEach(async () => {
         subjectExponent = subjectInitialPrice;
@@ -253,9 +299,9 @@ describe.only("BoundedStepwiseExponentialPriceAdapter", () => {
 
     describe("when it is not decreasing and the price computation will overflow", async () => {
       beforeEach(async () => {
-        subjectExponent = subjectInitialPrice;
         subjectIsDecreasing = false;
-        subjectMaxPrice = ether(110);
+        subjectInitialPrice = MAX_UINT_256;
+        subjectMaxPrice = MAX_UINT_256;
         subjectMinPrice = ether(100);
         subjectPriceAdapterConfigData = await boundedStepwiseExponentialPriceAdapter.getEncodedData(
           subjectInitialPrice,

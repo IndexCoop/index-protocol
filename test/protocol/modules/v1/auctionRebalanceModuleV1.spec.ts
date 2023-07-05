@@ -33,10 +33,11 @@ import {
 } from "@utils/test/index";
 import { SystemFixture } from "@utils/fixtures";
 import { ContractTransaction } from "ethers";
+import { before } from "mocha";
 
 const expect = getWaffleExpect();
 
-describe.only("AuctionRebalanceModuleV1", () => {
+describe("AuctionRebalanceModuleV1", () => {
   let owner: Account;
   let bidder: Account;
   let positionModule: Account;
@@ -794,6 +795,42 @@ describe.only("AuctionRebalanceModuleV1", () => {
       });
     });
 
+    describe("#isRebalanceDurationElapsed", async () => {
+      let subjectIncreaseTime: BigNumber;
+      let subjectSetTokenAddress: Address;
+
+      beforeEach(async () => {
+        await startRebalance();
+        subjectSetToken = indexWithQuoteAsset;
+        subjectSetTokenAddress = subjectSetToken.address;
+
+        subjectIncreaseTime = defaultDuration.add(1);
+      });
+
+      async function subject(setTokenAddress: Address): Promise<any> {
+        await increaseTimeAsync(subjectIncreaseTime);
+        return await auctionModule.isRebalanceDurationElapsed(setTokenAddress);
+      }
+
+      it("should return true if the rebalance duration has elapsed", async () => {
+        const isElapsed = await subject(subjectSetTokenAddress);
+
+        expect(isElapsed).to.be.true;
+      });
+
+      describe("when the rebalance duration has not elapsed", async () => {
+        beforeEach(async () => {
+          subjectIncreaseTime = defaultDuration.sub(1);
+        });
+
+        it("should return false", async () => {
+          const isElapsed = await subject(subjectSetTokenAddress);
+
+          expect(isElapsed).to.be.false;
+        });
+      });
+    });
+
     describe("#getRebalanceComponents", async () => {
       let subjectSetTokenAddress: Address;
 
@@ -923,6 +960,25 @@ describe.only("AuctionRebalanceModuleV1", () => {
       });
     });
 
+    describe("#getQuoteAssetBalance", async () => {
+      let subjectSetTokenAddress: Address;
+
+      beforeEach(async () => {
+        await startRebalance();
+        subjectSetTokenAddress = subjectSetToken.address;
+      });
+
+      async function subject(setTokenAddress: Address): Promise<any> {
+        return await auctionModule.getQuoteAssetBalance(setTokenAddress);
+      }
+
+      it("should return the correct quote asset balance", async () => {
+        const quoteAssetBalance = await subject(subjectSetTokenAddress);
+
+        expect(quoteAssetBalance).to.eq(ether(5));
+      });
+    });
+
     describe("#getBidPreview", async () => {
       let subjectComponent: Address;
       let subjectComponentQuantity: BigNumber;
@@ -946,7 +1002,7 @@ describe.only("AuctionRebalanceModuleV1", () => {
         );
       }
 
-      it("should return correct bid info for a sell auction", async () => {
+      it("should return correct bid info", async () => {
         const [
           setToken,
           sendToken,
@@ -978,40 +1034,247 @@ describe.only("AuctionRebalanceModuleV1", () => {
         expect(setTotalSupply).to.eq(ether(1));
       });
 
-      it("should return correct bid info for a buy auction", async () => {
-        subjectComponent = setup.wbtc.address;
-        subjectComponentQuantity = bitcoin(0.1);
-        subjectQuoteAssetLimit = ether(1.45);
+      describe("when it is a buy auction", async () => {
+        beforeEach(async () => {
+          subjectComponent = setup.wbtc.address;
+          subjectComponentQuantity = bitcoin(0.1);
+          subjectQuoteAssetLimit = ether(1.45);
+        });
 
-        const [
-          setToken,
-          sendToken,
-          receiveToken,
-          priceAdapter,
-          priceAdapterConfigData,
-          isSellAuction,
-          auctionQuantity,
-          componentPrice,
-          quantitySentBySet,
-          quantityReceivedBySet,
-          preBidTokenSentBalance,
-          preBidTokenReceivedBalance,
-          setTotalSupply,
-        ] = await subject();
+        it("should return correct bid info", async () => {
+          const [
+            setToken,
+            sendToken,
+            receiveToken,
+            priceAdapter,
+            priceAdapterConfigData,
+            isSellAuction,
+            auctionQuantity,
+            componentPrice,
+            quantitySentBySet,
+            quantityReceivedBySet,
+            preBidTokenSentBalance,
+            preBidTokenReceivedBalance,
+            setTotalSupply,
+          ] = await subject();
 
-        expect(setToken).to.eq(subjectSetToken.address);
-        expect(sendToken).to.eq(setup.weth.address);
-        expect(receiveToken).to.eq(subjectComponent);
-        expect(priceAdapter).to.eq(constantPriceAdapter.address);
-        expect(priceAdapterConfigData).to.eq(defaultWbtcData);
-        expect(isSellAuction).to.be.false;
-        expect(auctionQuantity).to.eq(bitcoin(0.1));
-        expect(componentPrice).to.eq(defaultWbtcPrice);
-        expect(quantitySentBySet).to.eq(subjectQuoteAssetLimit);
-        expect(quantityReceivedBySet).to.eq(subjectComponentQuantity);
-        expect(preBidTokenSentBalance).to.eq(ether(5));
-        expect(preBidTokenReceivedBalance).to.eq(bitcoin(0.5));
-        expect(setTotalSupply).to.eq(ether(1));
+          expect(setToken).to.eq(subjectSetToken.address);
+          expect(sendToken).to.eq(setup.weth.address);
+          expect(receiveToken).to.eq(subjectComponent);
+          expect(priceAdapter).to.eq(constantPriceAdapter.address);
+          expect(priceAdapterConfigData).to.eq(defaultWbtcData);
+          expect(isSellAuction).to.be.false;
+          expect(auctionQuantity).to.eq(bitcoin(0.1));
+          expect(componentPrice).to.eq(defaultWbtcPrice);
+          expect(quantitySentBySet).to.eq(subjectQuoteAssetLimit);
+          expect(quantityReceivedBySet).to.eq(subjectComponentQuantity);
+          expect(preBidTokenSentBalance).to.eq(ether(5));
+          expect(preBidTokenReceivedBalance).to.eq(bitcoin(0.5));
+          expect(setTotalSupply).to.eq(ether(1));
+        });
+      });
+    });
+
+    describe("#canUnlockEarly", async () => {
+      let subjectSetTokenAddress: Address;
+
+      beforeEach(async () => {
+        await startRebalance(
+          indexWithQuoteAsset.address,
+          defaultQuoteAsset,
+          defaultNewComponents,
+          defaultNewComponentsAuctionParams,
+          defaultOldComponentsAuctionParams,
+          true, // lock set token
+          defaultDuration,
+          defaultPositionMultiplier
+        );
+
+        await fundBidder(setup.weth, ether(0.45));
+        await bid(indexWithQuoteAsset, setup.dai, ether(900), ether(0.45));
+
+        await fundBidder(setup.wbtc, bitcoin(0.1));
+        await bid(indexWithQuoteAsset, setup.wbtc, bitcoin(0.1), ether(1.45));
+
+        subjectSetToken = indexWithQuoteAsset;
+        subjectSetTokenAddress = subjectSetToken.address;
+      });
+
+      async function subject(setTokenAddress: Address): Promise<any> {
+        return await auctionModule.canUnlockEarly(setTokenAddress);
+      }
+
+      it("should return true when the Set Token can be unlocked early", async () => {
+        const canUnlock = await subject(subjectSetTokenAddress);
+
+        expect(canUnlock).to.be.true;
+      });
+
+      describe("when the Set Token can not be unlocked early", async () => {
+        beforeEach(async () => {
+          await auctionModule.connect(owner.wallet).setRaiseTargetPercentage(subjectSetTokenAddress, ether(0.01));
+        });
+
+        it("should return false", async () => {
+          const canUnlock = await subject(subjectSetTokenAddress);
+
+          expect(canUnlock).to.be.false;
+        });
+      });
+    });
+
+    describe("#canRaiseAssetTargets", async () => {
+      let oldComponentsAuctionParams: AuctionExecutionParams[];
+
+      let subjectSetTokenAddress: Address;
+
+      beforeEach(async () => {
+        oldComponentsAuctionParams = [
+          {
+            targetUnit: ether(9100),
+            priceAdapterName: AdapterNames.CONSTANT_PRICE_ADAPTER,
+            priceAdapterConfigData: defaultDaiData
+          },
+          {
+            targetUnit: bitcoin(.54),
+            priceAdapterName: AdapterNames.CONSTANT_PRICE_ADAPTER,
+            priceAdapterConfigData: defaultWbtcData
+          },
+          {
+            targetUnit: ether(4),
+            priceAdapterName: AdapterNames.CONSTANT_PRICE_ADAPTER,
+            priceAdapterConfigData: defaultWethData
+          }
+        ];
+
+        subjectSetToken = indexWithQuoteAsset;
+        subjectSetTokenAddress = subjectSetToken.address;
+
+        await startRebalance(
+          subjectSetToken.address,
+          defaultQuoteAsset,
+          defaultNewComponents,
+          defaultNewComponentsAuctionParams,
+          oldComponentsAuctionParams,
+          defaultShouldLockSetToken,
+          defaultDuration,
+          defaultPositionMultiplier
+        );
+
+        await auctionModule.connect(owner.wallet).setRaiseTargetPercentage(subjectSetToken.address, ether(.0025));
+
+        await fundBidder(setup.weth, ether(0.45));
+        await bid(subjectSetToken, setup.dai, ether(900), ether(0.45));
+      });
+
+      async function subject(setTokenAddress: Address): Promise<any> {
+        return await auctionModule.canRaiseAssetTargets(setTokenAddress);
+      }
+
+      it("should return false when the asset targets cannot be raised", async () => {
+        const canRaiseTargets = await subject(subjectSetTokenAddress);
+
+        expect(canRaiseTargets).to.be.false;
+      });
+
+      describe("when the asset targets cannot be raised", async () => {
+        beforeEach(async () => {
+          await fundBidder(setup.wbtc, bitcoin(0.04));
+          await bid(subjectSetToken, setup.wbtc, bitcoin(0.04), ether(0.58));
+        });
+
+        it("should return true", async () => {
+          const canUnlock = await subject(subjectSetTokenAddress);
+
+          expect(canUnlock).to.be.true;
+        });
+      });
+    });
+
+    describe("#allTargetsMet", async () => {
+      let subjectSetTokenAddress: Address;
+
+      beforeEach(async () => {
+        await startRebalance();
+
+        await fundBidder(setup.weth, ether(0.45));
+        await bid(indexWithQuoteAsset, setup.dai, ether(900), ether(0.45));
+
+        subjectSetToken = indexWithQuoteAsset;
+        subjectSetTokenAddress = subjectSetToken.address;
+      });
+
+      async function subject(setTokenAddress: Address): Promise<any> {
+        return await auctionModule.allTargetsMet(setTokenAddress);
+      }
+
+      it("should return false when all targets not met", async () => {
+        const targetsMet = await subject(subjectSetTokenAddress);
+
+        expect(targetsMet).to.be.false;
+      });
+
+      describe("when the targets are met", async () => {
+        beforeEach(async () => {
+          await fundBidder(setup.wbtc, bitcoin(0.1));
+          await bid(indexWithQuoteAsset, setup.wbtc, bitcoin(0.1), ether(1.45));
+        });
+
+        it("should return true", async () => {
+          const targetsMet = await subject(subjectSetTokenAddress);
+
+          expect(targetsMet).to.be.true;
+        });
+      });
+    });
+
+    describe("#isQuoteAssetExcessOrAtTarget", async () => {
+      let subjectSetTokenAddress: Address;
+
+      beforeEach(async () => {
+        await startRebalance();
+
+        subjectSetToken = indexWithQuoteAsset;
+        subjectSetTokenAddress = subjectSetToken.address;
+      });
+
+      async function subject(setTokenAddress: Address): Promise<any> {
+        return await auctionModule.isQuoteAssetExcessOrAtTarget(setTokenAddress);
+      }
+
+      it("should return true when the quote asset is in excess", async () => {
+        const inExcess = await subject(subjectSetTokenAddress);
+
+        expect(inExcess).to.be.true;
+      });
+
+      describe("when the quote asset is at target", async () => {
+        beforeEach(async () => {
+          await fundBidder(setup.weth, ether(0.45));
+          await bid(indexWithQuoteAsset, setup.dai, ether(900), ether(0.45));
+
+          await fundBidder(setup.wbtc, bitcoin(0.1));
+          await bid(indexWithQuoteAsset, setup.wbtc, bitcoin(0.1), ether(1.45));
+        });
+
+        it("should return true", async () => {
+          const inExcess = await subject(subjectSetTokenAddress);
+
+          expect(inExcess).to.be.true;
+        });
+      });
+
+      describe("when the quote asset is under the target", async () => {
+        beforeEach(async () => {
+          await fundBidder(setup.wbtc, bitcoin(0.1));
+          await bid(indexWithQuoteAsset, setup.wbtc, bitcoin(0.1), ether(1.45));
+        });
+
+        it("should return false", async () => {
+          const inExcess = await subject(subjectSetTokenAddress);
+
+          expect(inExcess).to.be.false;
+        });
       });
     });
 
@@ -1518,6 +1781,7 @@ describe.only("AuctionRebalanceModuleV1", () => {
       let oldComponentsAuctionParams: AuctionExecutionParams[];
 
       let subjectRaiseTargetPercentage: BigNumber;
+      let subjectIncreaseTime: BigNumber;
 
       beforeEach(async () => {
         oldComponentsAuctionParams = [
@@ -1552,11 +1816,13 @@ describe.only("AuctionRebalanceModuleV1", () => {
         subjectSetToken = indexWithQuoteAsset;
         subjectCaller = bidder;
         subjectRaiseTargetPercentage = ether(.0025);
+        subjectIncreaseTime = ZERO;
 
         await auctionModule.connect(owner.wallet).setRaiseTargetPercentage(subjectSetToken.address, subjectRaiseTargetPercentage);
       });
 
       async function subject(): Promise<ContractTransaction> {
+        await increaseTimeAsync(subjectIncreaseTime);
         return await auctionModule.connect(subjectCaller.wallet).raiseAssetTargets(subjectSetToken.address);
       }
 
@@ -1767,6 +2033,16 @@ describe.only("AuctionRebalanceModuleV1", () => {
 
           expect(wbtcSize).to.be.gt(bitcoin(0.0001));
           expect(wbtcDirection).to.be.false;
+        });
+      });
+
+      describe("when the rebalance duration has elapsed", async () => {
+        beforeEach(async () => {
+          subjectIncreaseTime = defaultDuration.add(1);
+        });
+
+        it("should revert with 'Rebalance must be in progress'", async () => {
+          await expect(subject()).to.be.revertedWith("Rebalance must be in progress");
         });
       });
 
