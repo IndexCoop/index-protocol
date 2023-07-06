@@ -810,7 +810,7 @@ describe("AuctionRebalanceModuleV1", () => {
         subjectSetToken = indexWithQuoteAsset;
         subjectSetTokenAddress = subjectSetToken.address;
 
-        subjectIncreaseTime = defaultDuration.add(1);
+        subjectIncreaseTime = ZERO;
       });
 
       async function subject(setTokenAddress: Address): Promise<any> {
@@ -818,21 +818,21 @@ describe("AuctionRebalanceModuleV1", () => {
         return await auctionModule.isRebalanceDurationElapsed(setTokenAddress);
       }
 
-      it("should return true if the rebalance duration has elapsed", async () => {
+      it("should return false if the rebalance duration has not elapsed", async () => {
         const isElapsed = await subject(subjectSetTokenAddress);
 
-        expect(isElapsed).to.be.true;
+        expect(isElapsed).to.be.false;
       });
 
-      describe("when the rebalance duration has not elapsed", async () => {
+      describe("when the rebalance duration has elapsed", async () => {
         beforeEach(async () => {
-          subjectIncreaseTime = defaultDuration.sub(1);
+          subjectIncreaseTime = defaultDuration.add(1);
         });
 
-        it("should return false", async () => {
+        it("should return true", async () => {
           const isElapsed = await subject(subjectSetTokenAddress);
 
-          expect(isElapsed).to.be.false;
+          expect(isElapsed).to.be.true;
         });
       });
     });

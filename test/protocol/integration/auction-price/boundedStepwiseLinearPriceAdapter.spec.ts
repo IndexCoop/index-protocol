@@ -508,7 +508,6 @@ describe("BoundedStepwiseLinearPriceAdapter", () => {
     let subjectInitialPrice: BigNumber;
     let subjectSlope: BigNumber;
     let subjectBucketSize: BigNumber;
-    let subjectIsDecreasing: boolean;
     let subjectMaxPrice: BigNumber;
     let subjectMinPrice: BigNumber;
 
@@ -516,7 +515,6 @@ describe("BoundedStepwiseLinearPriceAdapter", () => {
       subjectInitialPrice = ether(100);
       subjectSlope = ether(1);
       subjectBucketSize = ONE_HOUR_IN_SECONDS;
-      subjectIsDecreasing = false;
       subjectMaxPrice = ether(110);
       subjectMinPrice = ether(100);
     });
@@ -526,7 +524,6 @@ describe("BoundedStepwiseLinearPriceAdapter", () => {
         subjectInitialPrice,
         subjectSlope,
         subjectBucketSize,
-        subjectIsDecreasing,
         subjectMaxPrice,
         subjectMinPrice
       );

@@ -43,7 +43,7 @@ contract BoundedStepwiseLinearPriceAdapter {
         ) = getDecodedData(_priceAdapterConfigData);
 
         require(
-            areParamsValid(initialPrice, slope, bucketSize, isDecreasing, maxPrice, minPrice), 
+            areParamsValid(initialPrice, slope, bucketSize, maxPrice, minPrice), 
             "BoundedStepwiseLinearPriceAdapter: Invalid params"
         );
 
@@ -89,12 +89,12 @@ contract BoundedStepwiseLinearPriceAdapter {
             uint256 initialPrice,
             uint256 slope,
             uint256 bucketSize,
-            bool isDecreasing,
+            ,
             uint256 maxPrice,
             uint256 minPrice
         ) = getDecodedData(_priceAdapterConfigData);
 
-        return areParamsValid(initialPrice, slope, bucketSize, isDecreasing, maxPrice, minPrice);
+        return areParamsValid(initialPrice, slope, bucketSize, maxPrice, minPrice);
     }
 
     /**
@@ -109,7 +109,6 @@ contract BoundedStepwiseLinearPriceAdapter {
         uint256 _initialPrice,
         uint256 _slope,
         uint256 _bucketSize,
-        bool /* _isDecreasing */,
         uint256 _maxPrice,
         uint256 _minPrice
     )

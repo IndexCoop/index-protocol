@@ -693,7 +693,6 @@ describe("BoundedStepwiseLogarithmicPriceAdapter", () => {
     let subjectScalingFactor: number;
     let subjectTimeCoefficient: BigNumber;
     let subjectBucketSize: BigNumber;
-    let subjectIsDecreasing: boolean;
     let subjectMaxPrice: BigNumber;
     let subjectMinPrice: BigNumber;
 
@@ -702,7 +701,6 @@ describe("BoundedStepwiseLogarithmicPriceAdapter", () => {
       subjectScalingFactor = 1;
       subjectTimeCoefficient = ether(1.718281828459045235); // approx e - 1
       subjectBucketSize = ONE_HOUR_IN_SECONDS;
-      subjectIsDecreasing = false;
       subjectMaxPrice = ether(110);
       subjectMinPrice = ether(100);
     });
@@ -713,7 +711,6 @@ describe("BoundedStepwiseLogarithmicPriceAdapter", () => {
         subjectScalingFactor,
         subjectTimeCoefficient,
         subjectBucketSize,
-        subjectIsDecreasing,
         subjectMaxPrice,
         subjectMinPrice
       );

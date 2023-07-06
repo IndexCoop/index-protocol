@@ -14,8 +14,8 @@ import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
 contract BoundedStepwiseLogarithmicPriceAdapter {
     using FixedPointMathLib for int256;
 
-    int256 private constant WAD = 1e18;
-    int256 private constant MAX_LOG_ARG = 2 ** 254 - 1;
+    int256 private constant WAD = 1e18;                   // Equivalent to PreciseUnitMath.preciseUnit()
+    int256 private constant MAX_LOG_ARG = 2 ** 254 - 1;   // To protect against overflow when adding WAD
 
     /**
      * @dev Calculates and returns the logarithmic price.
@@ -48,7 +48,7 @@ contract BoundedStepwiseLogarithmicPriceAdapter {
         ) = getDecodedData(_priceAdapterConfigData);
 
         require(
-            areParamsValid(initialPrice, scalingFactor, timeCoefficient, bucketSize, isDecreasing, maxPrice, minPrice), 
+            areParamsValid(initialPrice, scalingFactor, timeCoefficient, bucketSize, maxPrice, minPrice), 
             "BoundedStepwiseLogarithmicPriceAdapter: Invalid params"
         );
 
@@ -106,12 +106,12 @@ contract BoundedStepwiseLogarithmicPriceAdapter {
             uint256 scalingFactor,
             uint256 timeCoefficient,
             uint256 bucketSize,
-            bool isDecreasing,
+            ,
             uint256 maxPrice,
             uint256 minPrice
         ) = getDecodedData(_priceAdapterConfigData);
 
-        return areParamsValid(initialPrice, scalingFactor, timeCoefficient, bucketSize, isDecreasing, maxPrice, minPrice);
+        return areParamsValid(initialPrice, scalingFactor, timeCoefficient, bucketSize, maxPrice, minPrice);
     }
 
     /**
@@ -129,7 +129,6 @@ contract BoundedStepwiseLogarithmicPriceAdapter {
         uint256 _scalingFactor,
         uint256 _timeCoefficient,
         uint256 _bucketSize,
-        bool /* _isDecreasing */,
         uint256 _maxPrice,
         uint256 _minPrice
     )

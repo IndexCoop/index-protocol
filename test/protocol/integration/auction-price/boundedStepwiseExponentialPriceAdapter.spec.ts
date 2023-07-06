@@ -639,7 +639,6 @@ describe("BoundedStepwiseExponentialPriceAdapter", () => {
     let subjectCoefficient: number;
     let subjectExponent: BigNumber;
     let subjectBucketSize: BigNumber;
-    let subjectIsDecreasing: boolean;
     let subjectMaxPrice: BigNumber;
     let subjectMinPrice: BigNumber;
 
@@ -648,7 +647,6 @@ describe("BoundedStepwiseExponentialPriceAdapter", () => {
       subjectCoefficient = 1;
       subjectExponent = ether(1);
       subjectBucketSize = ONE_HOUR_IN_SECONDS;
-      subjectIsDecreasing = false;
       subjectMaxPrice = ether(110);
       subjectMinPrice = ether(100);
     });
@@ -659,7 +657,6 @@ describe("BoundedStepwiseExponentialPriceAdapter", () => {
         subjectCoefficient,
         subjectExponent,
         subjectBucketSize,
-        subjectIsDecreasing,
         subjectMaxPrice,
         subjectMinPrice
       );
