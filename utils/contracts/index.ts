@@ -16,6 +16,7 @@ export { BalancerV2ExchangeAdapter } from "../../typechain/BalancerV2ExchangeAda
 export { BasicIssuanceModule } from "../../typechain/BasicIssuanceModule";
 export { BoundedStepwiseExponentialPriceAdapter } from "../../typechain/BoundedStepwiseExponentialPriceAdapter";
 export { BoundedStepwiseLinearPriceAdapter } from "../../typechain/BoundedStepwiseLinearPriceAdapter";
+export { BoundedStepwiseLogarithmicPriceAdapter } from "../../typechain/BoundedStepwiseLogarithmicPriceAdapter";
 export { BytesArrayUtilsMock } from "../../typechain/BytesArrayUtilsMock";
 export { ChainlinkAggregatorMock } from "../../typechain/ChainlinkAggregatorMock";
 export { ClaimAdapterMock } from "../../typechain/ClaimAdapterMock";

@@ -9,7 +9,7 @@ import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
  * @notice Price adapter contract for the AuctionRebalanceModuleV1. It returns a price that
  * increases or decreases linearly in steps over time, within a bounded range.
  * The rate of change is constant.
- * price = initialPrice +/- coefficient * bucket
+ * Price formula: price = initialPrice +/- slope * timeBucket
  */
 contract BoundedStepwiseLinearPriceAdapter {
 

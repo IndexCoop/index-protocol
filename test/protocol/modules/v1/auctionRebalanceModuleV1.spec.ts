@@ -8,6 +8,7 @@ import {
   AuctionRebalanceModuleV1,
   BoundedStepwiseExponentialPriceAdapter,
   BoundedStepwiseLinearPriceAdapter,
+  BoundedStepwiseLogarithmicPriceAdapter,
   ConstantPriceAdapter,
   SetToken,
   StandardTokenMock,
@@ -52,11 +53,13 @@ describe("AuctionRebalanceModuleV1", () => {
     CONSTANT_PRICE_ADAPTER: "CONSTANT_PRICE_ADAPTER",
     BOUNDED_STEPWISE_EXPONENTIAL_PRICE_ADAPTER: "BOUNDED_STEPWISE_EXPONENTIAL_PRICE_ADAPTER",
     BOUNDED_STEPWISE_LINEAR_PRICE_ADAPTER: "BOUNDED_STEPWISE_LINEAR_PRICE_ADAPTER",
+    BOUNDED_STEPWISE_LOGARITHMIC_PRICE_ADAPTER: "BOUNDED_STEPWISE_LOGARITHMIC_PRICE_ADAPTER",
   };
 
   let constantPriceAdapter: ConstantPriceAdapter;
   let boundedStepwiseExponentialPriceAdapter: BoundedStepwiseExponentialPriceAdapter;
   let boundedStepwiseLinearPriceAdapter: BoundedStepwiseLinearPriceAdapter;
+  let boundedStepwiseLogarithmicPriceAdapter: BoundedStepwiseLogarithmicPriceAdapter;
 
   let indexWithQuoteAssetComponents: Address[];
   let indexWithQuoteAssetUnits: BigNumber[];
@@ -78,18 +81,21 @@ describe("AuctionRebalanceModuleV1", () => {
     constantPriceAdapter = await deployer.adapters.deployConstantPriceAdapter();
     boundedStepwiseExponentialPriceAdapter = await deployer.adapters.deployBoundedStepwiseExponentialPriceAdapter();
     boundedStepwiseLinearPriceAdapter = await deployer.adapters.deployBoundedStepwiseLinearPriceAdapter();
+    boundedStepwiseLogarithmicPriceAdapter = await deployer.adapters.deployBoundedStepwiseLogarithmicPriceAdapter();
 
     await setup.integrationRegistry.batchAddIntegration(
-      [auctionModule.address, auctionModule.address, auctionModule.address],
+      [auctionModule.address, auctionModule.address, auctionModule.address, auctionModule.address],
       [
         AdapterNames.CONSTANT_PRICE_ADAPTER,
         AdapterNames.BOUNDED_STEPWISE_EXPONENTIAL_PRICE_ADAPTER,
         AdapterNames.BOUNDED_STEPWISE_LINEAR_PRICE_ADAPTER,
+        AdapterNames.BOUNDED_STEPWISE_LOGARITHMIC_PRICE_ADAPTER,
       ],
       [
         constantPriceAdapter.address,
         boundedStepwiseExponentialPriceAdapter.address,
         boundedStepwiseLinearPriceAdapter.address,
+        boundedStepwiseLogarithmicPriceAdapter.address,
       ]
     );
   });
@@ -3142,6 +3148,193 @@ describe("AuctionRebalanceModuleV1", () => {
               subjectComponent,
               subjectCaller.address,
               boundedStepwiseExponentialPriceAdapter.address,
+              defaultShouldLockSetToken,
+              defaultWbtcPrice,
+              subjectQuoteAssetLimit,
+              subjectComponentAmount,
+              0,
+              totalSupply
+            );
+          });
+        });
+      });
+
+      describe("when the bid is priced using the BoundedStepwiseLogarithmicPriceAdapter", async () => {
+        let oldComponentsAuctionParams: AuctionExecutionParams[];
+
+        beforeEach(async () => {
+          const daiLogarithmicCurveParams = await boundedStepwiseLogarithmicPriceAdapter.getEncodedData(
+            ether(0.0005),
+            1,
+            ether(0.00001),
+            ONE_HOUR_IN_SECONDS,
+            true,
+            ether(0.00055),
+            ether(0.00049)
+          );
+
+          const wbtcPerWethDecimalFactor = ether(1).div(bitcoin(1));
+          const wbtcLogarithmicCurveParams = await boundedStepwiseLogarithmicPriceAdapter.getEncodedData(
+            ether(14.5).mul(wbtcPerWethDecimalFactor),
+            1,
+            ether(0.1).mul(wbtcPerWethDecimalFactor),
+            ONE_HOUR_IN_SECONDS,
+            false,
+            ether(15).mul(wbtcPerWethDecimalFactor),
+            ether(14).mul(wbtcPerWethDecimalFactor),
+          );
+
+          const wethLogarithmicCurveParams = await boundedStepwiseLogarithmicPriceAdapter.getEncodedData(
+            ether(1),
+            1,
+            ether(0.1),
+            ONE_HOUR_IN_SECONDS,
+            false,
+            ether(1),
+            ether(1),
+          );
+
+          oldComponentsAuctionParams = [
+            {
+              targetUnit: ether(9100),
+              priceAdapterName: AdapterNames.BOUNDED_STEPWISE_LOGARITHMIC_PRICE_ADAPTER,
+              priceAdapterConfigData: daiLogarithmicCurveParams
+            },
+            {
+              targetUnit: bitcoin(.6),
+              priceAdapterName: AdapterNames.BOUNDED_STEPWISE_LOGARITHMIC_PRICE_ADAPTER,
+              priceAdapterConfigData: wbtcLogarithmicCurveParams
+            },
+            {
+              targetUnit: ether(4),
+              priceAdapterName: AdapterNames.BOUNDED_STEPWISE_LOGARITHMIC_PRICE_ADAPTER,
+              priceAdapterConfigData: wethLogarithmicCurveParams
+            }
+          ];
+
+          await startRebalance(
+            subjectSetToken.address,
+            defaultQuoteAsset,
+            defaultNewComponents,
+            defaultNewComponentsAuctionParams,
+            oldComponentsAuctionParams,
+            defaultShouldLockSetToken,
+            defaultDuration,
+            defaultPositionMultiplier
+          );
+
+          subjectIncreaseTime = ZERO;
+        });
+
+
+        describe("when the bid is placed on a component sell auction", async () => {
+          beforeEach(async () => {
+            await fundBidder();
+          });
+
+          it("updates position units and transfers tokens correctly on a sell auction with BoundedStepwiseLogarithmicPriceAdapter", async () => {
+            const preBidBalances = {
+              bidderDai: await setup.dai.balanceOf(bidder.address),
+              bidderWeth: await setup.weth.balanceOf(bidder.address),
+              setTokenDai: await setup.dai.balanceOf(subjectSetToken.address),
+              setTokenWeth: await setup.weth.balanceOf(subjectSetToken.address)
+            };
+            const setTokenTotalSupply = await subjectSetToken.totalSupply();
+
+            await subject();
+
+            const expectedWethPositionUnits = preciseDiv(preBidBalances.setTokenWeth.add(subjectQuoteAssetLimit), setTokenTotalSupply);
+            const expectedDaiPositionUnits = preciseDiv(preBidBalances.setTokenDai.sub(subjectComponentAmount), setTokenTotalSupply);
+
+            const wethPositionUnits = await subjectSetToken.getDefaultPositionRealUnit(setup.weth.address);
+            const daiPositionUnits = await subjectSetToken.getDefaultPositionRealUnit(setup.dai.address);
+
+            expect(wethPositionUnits).to.eq(expectedWethPositionUnits);
+            expect(daiPositionUnits).to.eq(expectedDaiPositionUnits);
+
+            const postBidBalances = {
+              bidderDai: await setup.dai.balanceOf(bidder.address),
+              bidderWeth: await setup.weth.balanceOf(bidder.address),
+              setTokenDai: await setup.dai.balanceOf(subjectSetToken.address),
+              setTokenWeth: await setup.weth.balanceOf(subjectSetToken.address)
+            };
+
+            expect(postBidBalances.bidderDai).to.eq(preBidBalances.bidderDai.add(subjectComponentAmount));
+            expect(postBidBalances.bidderWeth).to.eq(preBidBalances.bidderWeth.sub(subjectQuoteAssetLimit));
+            expect(postBidBalances.setTokenDai).to.eq(preBidBalances.setTokenDai.sub(subjectComponentAmount));
+            expect(postBidBalances.setTokenWeth).to.eq(preBidBalances.setTokenWeth.add(subjectQuoteAssetLimit));
+          });
+
+          it("emits the correct BidExecuted event", async () => {
+            const totalSupply = await subjectSetToken.totalSupply();
+
+            await expect(subject()).to.emit(auctionModule, "BidExecuted").withArgs(
+              subjectSetToken.address,
+              subjectComponent,
+              defaultQuoteAsset,
+              subjectCaller.address,
+              boundedStepwiseLogarithmicPriceAdapter.address,
+              true,
+              defaultDaiPrice,
+              subjectComponentAmount,
+              subjectQuoteAssetLimit,
+              0,
+              totalSupply
+            );
+          });
+        });
+
+        describe("when the bid is placed on a component buy auction", async () => {
+          beforeEach(async () => {
+            await fundBidder(setup.wbtc, bitcoin(0.1));
+
+            subjectComponent = setup.wbtc.address;
+            subjectComponentAmount = bitcoin(0.1);
+            subjectQuoteAssetLimit = ether(1.45);
+          });
+
+          it("updates position units and transfers tokens correctly on a buy auction with BoundedStepwiseLogarithmicPriceAdapter", async () => {
+            const preBidBalances = {
+              bidderWbtc: await setup.wbtc.balanceOf(bidder.address),
+              bidderWeth: await setup.weth.balanceOf(bidder.address),
+              setTokenWbtc: await setup.wbtc.balanceOf(subjectSetToken.address),
+              setTokenWeth: await setup.weth.balanceOf(subjectSetToken.address)
+            };
+            const setTokenTotalSupply = await subjectSetToken.totalSupply();
+
+            await subject();
+
+            const expectedWethPositionUnits = preciseDiv(preBidBalances.setTokenWeth.sub(subjectQuoteAssetLimit), setTokenTotalSupply);
+            const expectedWbtcPositionUnits = preciseDiv(preBidBalances.setTokenWbtc.add(subjectComponentAmount), setTokenTotalSupply);
+
+            const wethPositionUnits = await subjectSetToken.getDefaultPositionRealUnit(setup.weth.address);
+            const wbtcPositionUnits = await subjectSetToken.getDefaultPositionRealUnit(setup.wbtc.address);
+
+            expect(wethPositionUnits).to.eq(expectedWethPositionUnits);
+            expect(wbtcPositionUnits).to.eq(expectedWbtcPositionUnits);
+
+            const postBidBalances = {
+              bidderWbtc: await setup.wbtc.balanceOf(bidder.address),
+              bidderWeth: await setup.weth.balanceOf(bidder.address),
+              setTokenWbtc: await setup.wbtc.balanceOf(subjectSetToken.address),
+              setTokenWeth: await setup.weth.balanceOf(subjectSetToken.address)
+            };
+
+            expect(postBidBalances.bidderWbtc).to.eq(preBidBalances.bidderWbtc.sub(subjectComponentAmount));
+            expect(postBidBalances.bidderWeth).to.eq(preBidBalances.bidderWeth.add(subjectQuoteAssetLimit));
+            expect(postBidBalances.setTokenWbtc).to.eq(preBidBalances.setTokenWbtc.add(subjectComponentAmount));
+            expect(postBidBalances.setTokenWeth).to.eq(preBidBalances.setTokenWeth.sub(subjectQuoteAssetLimit));
+          });
+
+          it("emits the correct BidExecuted event", async () => {
+            const totalSupply = await subjectSetToken.totalSupply();
+
+            await expect(subject()).to.emit(auctionModule, "BidExecuted").withArgs(
+              subjectSetToken.address,
+              defaultQuoteAsset,
+              subjectComponent,
+              subjectCaller.address,
+              boundedStepwiseLogarithmicPriceAdapter.address,
               defaultShouldLockSetToken,
               defaultWbtcPrice,
               subjectQuoteAssetLimit,

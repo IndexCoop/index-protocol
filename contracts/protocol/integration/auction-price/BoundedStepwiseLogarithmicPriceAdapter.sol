@@ -4,26 +4,26 @@ pragma solidity 0.8.17;
 import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
 
 /**
- * @title BoundedStepwiseExponentialPriceAdapter
+ * @title BoundedStepwiseLogarithmicPriceAdapter
  * @author Index Coop
  * @notice Price adapter contract for the AuctionRebalanceModuleV1. It returns a price that
- * increases or decreases exponentially in steps over time, within a bounded range.
- * The rate of change is increasing.
- * Price formula: price = initialPrice +/- scalingFactor * e ^ (timeCoefficient * timeBucket)
+ * increases or decreases logarithmically in steps over time, within a bounded range.
+ * The rate of change is decreasing.
+ * Price formula: price = initialPrice +/- scalingFactor * ln(timeCoefficient * timeBucket)
  */
-contract BoundedStepwiseExponentialPriceAdapter {
+contract BoundedStepwiseLogarithmicPriceAdapter {
     using FixedPointMathLib for int256;
 
-    uint256 constant WAD = 1e18;
-    int256 constant MAX_EXP_ARG = 100e18;
+    int256 private constant WAD = 1e18;
+    int256 private constant MAX_LOG_ARG = 2 ** 254 - 1;
 
     /**
-     * @dev Calculates and returns the exponential price.
+     * @dev Calculates and returns the logarithmic price.
      *
      * @param _timeElapsed              Time elapsed since the start of the auction.
-     * @param _priceAdapterConfigData   Encoded bytes representing the exponential function parameters.
+     * @param _priceAdapterConfigData   Encoded bytes representing the logarithmic function parameters.
      *
-     * @return price                    The price calculated using the exponential function.
+     * @return price                    The price calculated using the logarithmic function.
      */
     function getPrice(
         address /* _setToken */,
@@ -49,28 +49,28 @@ contract BoundedStepwiseExponentialPriceAdapter {
 
         require(
             areParamsValid(initialPrice, scalingFactor, timeCoefficient, bucketSize, isDecreasing, maxPrice, minPrice), 
-            "BoundedStepwiseExponentialPriceAdapter: Invalid params"
+            "BoundedStepwiseLogarithmicPriceAdapter: Invalid params"
         );
 
         uint256 timeBucket = _timeElapsed / bucketSize;
 
-        // Protect against exponential argument overflow
+        // Protect against logarithmic argument overflow
         if (timeBucket > type(uint256).max / timeCoefficient) {
             return _getBoundaryPrice(isDecreasing, maxPrice, minPrice);
         }
-        int256 expArgument = int256(timeCoefficient * timeBucket);
+        int256 lnArgument = int256(timeBucket * timeCoefficient);
         
-        // Protect against exponential overflow and increasing relative error
-        if (expArgument > MAX_EXP_ARG) {
+        // Protect against logarithmic overflow and increasing relative error
+        if (lnArgument > MAX_LOG_ARG) {
             return _getBoundaryPrice(isDecreasing, maxPrice, minPrice);
         }
-        uint256 expExpression = uint256(FixedPointMathLib.expWad(expArgument));
+        uint256 lnExpression = uint256(FixedPointMathLib.lnWad(lnArgument + WAD));
 
         // Protect against priceChange overflow
-        if (scalingFactor > type(uint256).max / expExpression) {
+        if (lnExpression > type(uint256).max / scalingFactor) {
             return _getBoundaryPrice(isDecreasing, maxPrice, minPrice);
         }
-        uint256 priceChange = scalingFactor * expExpression - WAD;
+        uint256 priceChange = scalingFactor * lnExpression;
 
         if (isDecreasing) {
             // Protect against price underflow
@@ -118,8 +118,8 @@ contract BoundedStepwiseExponentialPriceAdapter {
      * @dev Returns true if the price adapter parameters are valid.
      * 
      * @param _initialPrice      Initial price of the auction
-     * @param _scalingFactor     Scaling factor for exponential expression
-     * @param _timeCoefficient   Scaling factor for exponential argument
+     * @param _scalingFactor     Scaling factor for logarithmic expression
+     * @param _timeCoefficient   Scaling factor for logarithmic argument
      * @param _bucketSize        Time elapsed between each bucket
      * @param _maxPrice          Maximum price of the auction
      * @param _minPrice          Minimum price of the auction
@@ -149,8 +149,8 @@ contract BoundedStepwiseExponentialPriceAdapter {
      * @dev Returns the encoded data for the price curve parameters
      * 
      * @param _initialPrice        Initial price of the auction
-     * @param _scalingFactor       Scaling factor for exponential expression
-     * @param _timeCoefficient     Scaling factor for exponential argument
+     * @param _scalingFactor       Scaling factor for logarithmic expression
+     * @param _timeCoefficient     Scaling factor for logarithmic argument
      * @param _bucketSize          Time elapsed between each bucket
      * @param _isDecreasing        Flag for whether the price is decreasing or increasing
      * @param _maxPrice            Maximum price of the auction
@@ -177,8 +177,8 @@ contract BoundedStepwiseExponentialPriceAdapter {
      *
      * @param _data                Bytes encoded auction parameters
      * @return initialPrice        Initial price of the auction
-     * @return scalingFactor       Scaling factor for exponential expression
-     * @return timeCoefficient     Scaling factor for exponential argument
+     * @return scalingFactor       Scaling factor for logarithmic expression
+     * @return timeCoefficient     Scaling factor for logarithmic argument
      * @return bucketSize          Time elapsed between each bucket
      * @return isDecreasing        Flag for whether the price is decreasing or increasing
      * @return maxPrice            Maximum price of the auction
