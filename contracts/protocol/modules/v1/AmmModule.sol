@@ -422,6 +422,12 @@ contract AmmModule is ModuleBase, ReentrancyGuard {
             _actionInfo.setToken.invokeApprove(
                 _actionInfo.components[i],
                 spender,
+                0
+            );
+
+            _actionInfo.setToken.invokeApprove(
+                _actionInfo.components[i],
+                spender,
                 _actionInfo.totalNotionalComponents[i]
             );
         }
