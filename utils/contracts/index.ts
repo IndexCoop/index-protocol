@@ -17,6 +17,7 @@ export { BasicIssuanceModule } from "../../typechain/BasicIssuanceModule";
 export { BoundedStepwiseExponentialPriceAdapter } from "../../typechain/BoundedStepwiseExponentialPriceAdapter";
 export { BoundedStepwiseLinearPriceAdapter } from "../../typechain/BoundedStepwiseLinearPriceAdapter";
 export { BoundedStepwiseLogarithmicPriceAdapter } from "../../typechain/BoundedStepwiseLogarithmicPriceAdapter";
+export { BridgedSetToken } from "../../typechain/BridgedSetToken";
 export { BytesArrayUtilsMock } from "../../typechain/BytesArrayUtilsMock";
 export { ChainlinkAggregatorMock } from "../../typechain/ChainlinkAggregatorMock";
 export { ClaimAdapterMock } from "../../typechain/ClaimAdapterMock";

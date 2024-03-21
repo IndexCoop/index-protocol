@@ -3,11 +3,13 @@ import { BigNumber } from "ethers";
 
 import {
   AssetLimitHook,
-  AMMSplitter
+  AMMSplitter,
+  BridgedSetToken,
 } from "../contracts";
 
 import { AssetLimitHook__factory } from "../../typechain/factories/AssetLimitHook__factory";
 import { AMMSplitter__factory } from "../../typechain/factories/AMMSplitter__factory";
+import { BridgedSetToken__factory } from "../../typechain/factories/BridgedSetToken__factory";
 import { Address } from "../types";
 
 export default class DeployProduct {
@@ -35,5 +37,15 @@ export default class DeployProduct {
     sushiFactory: Address
   ): Promise<AMMSplitter> {
     return await new AMMSplitter__factory(this._deployerSigner).deploy(uniRouter, sushiRouter, uniFactory, sushiFactory);
+  }
+
+  public async deployBridgedSetToken(
+    _name: string,
+    _symbol: string,
+  ): Promise<BridgedSetToken> {
+    return await new BridgedSetToken__factory(this._deployerSigner).deploy(
+      _name,
+      _symbol,
+    );
   }
 }

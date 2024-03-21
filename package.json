@@ -102,6 +102,7 @@
     "@nomiclabs/hardhat-ethers": "^2.0.2",
     "@nomiclabs/hardhat-waffle": "^2.0.1",
     "@openzeppelin/contracts": "^3.1.0",
+    "@chainlink/contracts-ccip": "1.2.1",
     "@semantic-release/git": "^10.0.1",
     "@typechain/ethers-v5": "8.0.5",
     "@typechain/hardhat": "3.1.0",
