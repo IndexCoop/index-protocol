@@ -109,7 +109,7 @@ describe("Notional trade module integration [ @forked-mainnet ]", () => {
 
         before(async () => {
           underlyingToken = (await ethers.getContractAt(
-            "IERC20Metadata",
+            "contracts/interfaces/IERC20Metadata.sol:IERC20Metadata",
             tokens[underlyingTokens[assetTokenName]].address,
             tokens[underlyingTokens[assetTokenName]].signer,
           )) as IERC20Metadata;
