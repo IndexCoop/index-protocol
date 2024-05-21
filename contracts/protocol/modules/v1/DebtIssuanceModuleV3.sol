@@ -75,14 +75,9 @@ contract DebtIssuanceModuleV3 is DebtIssuanceModuleV2 {
         returns (address[] memory components, uint256[] memory equityUnits, uint256[] memory debtUnits)
     {
         (components, equityUnits, debtUnits) = _getRequiredComponentIssuanceUnits(_setToken, _quantity);
-        for(uint256 i = 0; i < components.length; i++) {
+        for(uint256 i = 0; i < equityUnits.length; i++) {
             if(equityUnits[i] > 0) {
                 equityUnits[i] += tokenTransferBuffer;
-            }
-            if(debtUnits[i] > tokenTransferBuffer) {
-                debtUnits[i] -= tokenTransferBuffer;
-            } else {
-                debtUnits[i] = 0;
             }
         }
     }
@@ -106,10 +101,7 @@ contract DebtIssuanceModuleV3 is DebtIssuanceModuleV2 {
         ) = calculateTotalFees(_setToken, _quantity, false);
 
         (components, equityUnits, debtUnits) = _calculateRequiredComponentIssuanceUnits(_setToken, totalQuantity, false);
-        for(uint256 i = 0; i < components.length; i++) {
-            if(debtUnits[i] > 0) {
-                debtUnits[i] += tokenTransferBuffer;
-            }
+        for(uint256 i = 0; i < equityUnits.length; i++) {
             if(equityUnits[i] > tokenTransferBuffer) {
                 equityUnits[i] -= tokenTransferBuffer;
             } else {
@@ -203,50 +195,6 @@ contract DebtIssuanceModuleV3 is DebtIssuanceModuleV2 {
 
 
                     IssuanceValidationUtils.validateCollateralizationPostTransferOut(_setToken, component, _finalSetSupply);
-                }
-            }
-        }
-    }
-
-    /**
-     * @dev Same as in v2 but adjusting the token transfers by the tokenTransferBuffer (adding when transferring in, subtracting when transferring out)
-     */
-    function _resolveDebtPositions(
-        ISetToken _setToken,
-        uint256 _quantity,
-        bool _isIssue,
-        address[] memory _components,
-        uint256[] memory _componentDebtQuantities,
-        uint256 _initialSetSupply,
-        uint256 _finalSetSupply
-    )
-        internal
-        override
-    {
-        for (uint256 i = 0; i < _components.length; i++) {
-            address component = _components[i];
-            uint256 componentQuantity = _componentDebtQuantities[i];
-            if (componentQuantity > 0) {
-                if (_isIssue) {
-                    _executeExternalPositionHooks(_setToken, _quantity, IERC20(component), true, false);
-
-                    // Transfer out a few wei less than the calculated quantity to avoid undercollateralization in case of rounding error on the token
-                    _setToken.invokeTransfer(component, msg.sender, componentQuantity - tokenTransferBuffer); 
-
-                    IssuanceValidationUtils.validateCollateralizationPostTransferOut(_setToken, component, _finalSetSupply);
-                } else {
-                    // Call SafeERC20#safeTransferFrom instead of ExplicitERC20#transferFrom
-                    SafeERC20.safeTransferFrom(
-                        IERC20(component),
-                        msg.sender,
-                        address(_setToken),
-                        // Transfer in a few wei more than the calculated quantity to avoid undercollateralization in case of rounding error on the token
-                        componentQuantity + tokenTransferBuffer
-                    );
-
-                    IssuanceValidationUtils.validateCollateralizationPostTransferInPreHook(_setToken, component, _initialSetSupply, componentQuantity);
-
-                    _executeExternalPositionHooks(_setToken, _quantity, IERC20(component), false, false);
                 }
             }
         }
