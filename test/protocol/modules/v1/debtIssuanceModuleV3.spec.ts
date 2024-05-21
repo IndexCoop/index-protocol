@@ -200,10 +200,8 @@ describe("DebtIssuanceModuleV3", () => {
           expect(postSetWethBalance).to.eq(
             preSetWethBalance.add(wethFlows).add(tokenTransferBuffer),
           );
-          expect(postMinterDaiBalance).to.eq(
-            preMinterDaiBalance.add(daiFlows).sub(tokenTransferBuffer),
-          );
-          expect(postSetDaiBalance).to.eq(preSetDaiBalance.add(tokenTransferBuffer));
+          expect(postMinterDaiBalance).to.eq(preMinterDaiBalance.add(daiFlows));
+          expect(postSetDaiBalance).to.eq(preSetDaiBalance);
           expect(postExternalDaiBalance).to.eq(preExternalDaiBalance.sub(daiFlows));
         });
 
@@ -289,10 +287,8 @@ describe("DebtIssuanceModuleV3", () => {
               preSetWethBalance.add(wethDefaultFlows).add(tokenTransferBuffer),
             );
             expect(postExternalWethBalance).to.eq(preExternalWethBalance.add(wethExternalFlows));
-            expect(postMinterDaiBalance).to.eq(
-              preMinterDaiBalance.add(daiFlows).sub(tokenTransferBuffer),
-            );
-            expect(postSetDaiBalance).to.eq(preSetDaiBalance.add(tokenTransferBuffer));
+            expect(postMinterDaiBalance).to.eq(preMinterDaiBalance.add(daiFlows));
+            expect(postSetDaiBalance).to.eq(preSetDaiBalance);
             expect(postExternalDaiBalance).to.eq(preExternalDaiBalance.sub(daiFlows));
           });
         });
@@ -343,10 +339,8 @@ describe("DebtIssuanceModuleV3", () => {
             expect(postSetWethBalance).to.eq(
               preSetWethBalance.add(wethDefaultFlows).add(tokenTransferBuffer),
             );
-            expect(postMinterDaiBalance).to.eq(
-              preMinterDaiBalance.add(daiFlows).sub(tokenTransferBuffer),
-            );
-            expect(postSetDaiBalance).to.eq(preSetDaiBalance.add(tokenTransferBuffer));
+            expect(postMinterDaiBalance).to.eq(preMinterDaiBalance.add(daiFlows));
+            expect(postSetDaiBalance).to.eq(preSetDaiBalance);
             expect(postExternalDaiBalance).to.eq(preExternalDaiBalance.sub(daiFlows));
           });
         });
@@ -493,10 +487,8 @@ describe("DebtIssuanceModuleV3", () => {
           expect(postSetWethBalance).to.eq(
             preSetWethBalance.sub(wethFlows).add(tokenTransferBuffer),
           );
-          expect(postRedeemerDaiBalance).to.eq(
-            preRedeemerDaiBalance.sub(daiFlows).sub(tokenTransferBuffer),
-          );
-          expect(postSetDaiBalance).to.eq(preSetDaiBalance.add(tokenTransferBuffer));
+          expect(postRedeemerDaiBalance).to.eq(preRedeemerDaiBalance.sub(daiFlows));
+          expect(postSetDaiBalance).to.eq(preSetDaiBalance);
           expect(postExternalDaiBalance).to.eq(preExternalDaiBalance.add(daiFlows));
         });
 
@@ -577,10 +569,8 @@ describe("DebtIssuanceModuleV3", () => {
               preSetWethBalance.sub(wethDefaultFlows).add(tokenTransferBuffer),
             );
             expect(postExternalWethBalance).to.eq(preExternalWethBalance.sub(wethExternalFlows));
-            expect(postRedeemerDaiBalance).to.eq(
-              preRedeemerDaiBalance.sub(daiFlows).sub(tokenTransferBuffer),
-            );
-            expect(postSetDaiBalance).to.eq(preSetDaiBalance.add(tokenTransferBuffer));
+            expect(postRedeemerDaiBalance).to.eq(preRedeemerDaiBalance.sub(daiFlows));
+            expect(postSetDaiBalance).to.eq(preSetDaiBalance);
             expect(postExternalDaiBalance).to.eq(preExternalDaiBalance.add(daiFlows));
           });
         });
@@ -627,10 +617,8 @@ describe("DebtIssuanceModuleV3", () => {
             expect(postSetWethBalance).to.eq(
               preSetWethBalance.sub(wethFlows).add(tokenTransferBuffer),
             );
-            expect(postRedeemerDaiBalance).to.eq(
-              preRedeemerDaiBalance.sub(daiFlows).sub(tokenTransferBuffer),
-            );
-            expect(postSetDaiBalance).to.eq(preSetDaiBalance.add(tokenTransferBuffer));
+            expect(postRedeemerDaiBalance).to.eq(preRedeemerDaiBalance.sub(daiFlows));
+            expect(postSetDaiBalance).to.eq(preSetDaiBalance);
             expect(postExternalDaiBalance).to.eq(preExternalDaiBalance.add(daiFlows));
           });
         });
@@ -727,7 +715,7 @@ describe("DebtIssuanceModuleV3", () => {
 
           const expectedComponents = await setToken.getComponents();
           const expectedEquityFlows = [wethFlows.add(tokenTransferBuffer), ZERO];
-          const expectedDebtFlows = [ZERO, daiFlows.sub(tokenTransferBuffer)];
+          const expectedDebtFlows = [ZERO, daiFlows];
 
           expect(expectedComponents).to.deep.eq(components);
           expect(expectedEquityFlows).to.deep.eq(equityFlows);
@@ -754,7 +742,7 @@ describe("DebtIssuanceModuleV3", () => {
 
             const expectedComponents = await setToken.getComponents();
             const expectedEquityFlows = [wethFlows.add(tokenTransferBuffer), ZERO];
-            const expectedDebtFlows = [ZERO, daiFlows.sub(tokenTransferBuffer)];
+            const expectedDebtFlows = [ZERO, daiFlows];
 
             expect(expectedComponents).to.deep.eq(components);
             expect(expectedEquityFlows).to.deep.eq(equityFlows);
@@ -786,7 +774,7 @@ describe("DebtIssuanceModuleV3", () => {
               wethFlows.add(tokenTransferBuffer),
               daiEquityFlows.add(tokenTransferBuffer),
             ];
-            const expectedDebtFlows = [ZERO, daiDebtFlows.sub(tokenTransferBuffer)];
+            const expectedDebtFlows = [ZERO, daiDebtFlows];
 
             expect(expectedComponents).to.deep.eq(components);
             expect(expectedEquityFlows).to.deep.eq(equityFlows);
@@ -1099,7 +1087,7 @@ describe("DebtIssuanceModuleV3", () => {
 
           const expectedComponents = await setToken.getComponents();
           const expectedEquityFlows = [wethFlows.add(tokenTransferBuffer), ZERO];
-          const expectedDebtFlows = [ZERO, daiFlows.sub(tokenTransferBuffer)];
+          const expectedDebtFlows = [ZERO, daiFlows];
 
           expect(expectedComponents).to.deep.eq(components);
           expect(expectedEquityFlows).to.deep.eq(equityFlows);
@@ -1126,7 +1114,7 @@ describe("DebtIssuanceModuleV3", () => {
 
             const expectedComponents = await setToken.getComponents();
             const expectedEquityFlows = [wethFlows.add(tokenTransferBuffer), ZERO];
-            const expectedDebtFlows = [ZERO, daiFlows.sub(tokenTransferBuffer)];
+            const expectedDebtFlows = [ZERO, daiFlows];
 
             expect(expectedComponents).to.deep.eq(components);
             expect(expectedEquityFlows).to.deep.eq(equityFlows);
@@ -1158,7 +1146,7 @@ describe("DebtIssuanceModuleV3", () => {
               wethFlows.add(tokenTransferBuffer),
               daiEquityFlows.add(tokenTransferBuffer),
             ];
-            const expectedDebtFlows = [ZERO, daiDebtFlows.sub(tokenTransferBuffer)];
+            const expectedDebtFlows = [ZERO, daiDebtFlows];
 
             expect(expectedComponents).to.deep.eq(components);
             expect(expectedEquityFlows).to.deep.eq(equityFlows);
@@ -1192,7 +1180,7 @@ describe("DebtIssuanceModuleV3", () => {
 
             const expectedComponents = await setToken.getComponents();
             const expectedEquityFlows = [wethFlows.add(tokenTransferBuffer).add(tokenTransferBuffer), ZERO];
-            const expectedDebtFlows = [ZERO, daiFlows.sub(tokenTransferBuffer)];
+            const expectedDebtFlows = [ZERO, daiFlows];
 
             expect(expectedComponents).to.deep.eq(components);
             expect(expectedEquityFlows).to.deep.eq(equityFlows);
@@ -1222,7 +1210,7 @@ describe("DebtIssuanceModuleV3", () => {
 
               const expectedComponents = await setToken.getComponents();
               const expectedEquityFlows = [wethFlows.add(tokenTransferBuffer).add(tokenTransferBuffer), ZERO];
-              const expectedDebtFlows = [ZERO, daiFlows.sub(tokenTransferBuffer)];
+              const expectedDebtFlows = [ZERO, daiFlows];
 
               expect(expectedComponents).to.deep.eq(components);
               expect(expectedEquityFlows).to.deep.eq(equityFlows);
