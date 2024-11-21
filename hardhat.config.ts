@@ -29,8 +29,19 @@ const arbitrumForkingConfig = {
   blockNumber: 201830000,
 };
 
-export const forkingConfig =
-  process.env.FORK_NETWORK === "arbitrum" ? arbitrumForkingConfig : ethereumForkingConfig;
+const baseForkingConfig = {
+  url: process.env.BASE_RPC_URL ?? "",
+  blockNumber: 22598000,
+};
+
+const forkConfigs = {
+  ethereum: ethereumForkingConfig,
+  arbitrum: arbitrumForkingConfig,
+  base: baseForkingConfig,
+};
+
+// @ts-ignore
+export const forkingConfig = forkConfigs[process.env.FORK_NETWORK ?? "ethereum"];
 
 const mainnetForkMochaConfig = {
   grep: "@forked-mainnet",
@@ -44,16 +55,27 @@ const arbitrumForkMochaConfig = {
   timeout: 200000,
 } as Mocha.MochaOptions;
 
+const baseForkMochaConfig = {
+  grep: "@forked-base",
+  invert: false,
+  timeout: 200000,
+} as Mocha.MochaOptions;
+
 const unittestMochaConfig = {
   grep: "@forked",
   invert: true,
   timeout: 200000,
 } as Mocha.MochaOptions;
 
+const mochaConfigs = {
+  ethereum: mainnetForkMochaConfig,
+  arbitrum: arbitrumForkMochaConfig,
+  base: baseForkMochaConfig,
+};
+
 const mochaConfig = process.env.FORK
-  ? process.env.FORK_NETWORK === "arbitrum"
-    ? arbitrumForkMochaConfig
-    : mainnetForkMochaConfig
+    //@ts-ignore
+  ? mochaConfigs[process.env.FORK_NETWORK ?? "ethereum"]
   : unittestMochaConfig;
 
 checkForkedProviderEnvironment();
@@ -96,17 +118,20 @@ const config: HardhatUserConfig = {
       accounts: getHardhatPrivateKeys(),
       gas: 12000000,
       blockGasLimit: 12000000,
+      allowBlocksWithSameTimestamp: process.env.BLOCK_WITH_SAME_TIMESTAMP === "true",
     },
     localhost: {
       url: "http://127.0.0.1:8545",
       timeout: 200000,
       gas: 12000000,
       blockGasLimit: 12000000,
+      allowBlocksWithSameTimestamp: process.env.BLOCK_WITH_SAME_TIMESTAMP === "true",
     },
     // To update coverage network configuration got o .solcover.js and update param in providerOptions field
     coverage: {
       url: "http://127.0.0.1:8555", // Coverage launches its own ganache-cli client
       timeout: 200000,
+      allowBlocksWithSameTimestamp: process.env.BLOCK_WITH_SAME_TIMESTAMP === "true",
     },
     ...(process.env.KOVAN_DEPLOY_PRIVATE_KEY && hardhatNetworks),
   },
@@ -187,40 +212,39 @@ task("index:compile:one", "Compiles a single contract in isolation")
     await env.run("typechain");
   });
 
-task("index:compile:all", "Compiles all contracts in isolation").setAction(async function (
-  _args,
-  env,
-) {
-  const allArtifacts = await env.artifacts.getAllFullyQualifiedNames();
-  for (const contractName of allArtifacts) {
-    const sourceName = env.artifacts.readArtifactSync(contractName).sourceName;
+task("index:compile:all", "Compiles all contracts in isolation").setAction(
+  async function (_args, env) {
+    const allArtifacts = await env.artifacts.getAllFullyQualifiedNames();
+    for (const contractName of allArtifacts) {
+      const sourceName = env.artifacts.readArtifactSync(contractName).sourceName;
 
-    const dependencyGraph: DependencyGraph = await env.run(
-      TASK_COMPILE_SOLIDITY_GET_DEPENDENCY_GRAPH,
-      {
-        sourceNames: [sourceName],
-      },
-    );
+      const dependencyGraph: DependencyGraph = await env.run(
+        TASK_COMPILE_SOLIDITY_GET_DEPENDENCY_GRAPH,
+        {
+          sourceNames: [sourceName],
+        },
+      );
 
-    const resolvedFiles = dependencyGraph.getResolvedFiles().filter(resolvedFile => {
-      return resolvedFile.sourceName === sourceName;
-    });
+      const resolvedFiles = dependencyGraph.getResolvedFiles().filter(resolvedFile => {
+        return resolvedFile.sourceName === sourceName;
+      });
 
-    const compilationJob: CompilationJob = await env.run(
-      TASK_COMPILE_SOLIDITY_GET_COMPILATION_JOB_FOR_FILE,
-      {
-        dependencyGraph,
-        file: resolvedFiles[0],
-      },
-    );
+      const compilationJob: CompilationJob = await env.run(
+        TASK_COMPILE_SOLIDITY_GET_COMPILATION_JOB_FOR_FILE,
+        {
+          dependencyGraph,
+          file: resolvedFiles[0],
+        },
+      );
 
-    await env.run(TASK_COMPILE_SOLIDITY_COMPILE_JOB, {
-      compilationJob,
-      compilationJobs: [compilationJob],
-      compilationJobIndex: 0,
-      emitsArtifacts: true,
-      quiet: true,
-    });
-  }
-});
+      await env.run(TASK_COMPILE_SOLIDITY_COMPILE_JOB, {
+        compilationJob,
+        compilationJobs: [compilationJob],
+        compilationJobIndex: 0,
+        emitsArtifacts: true,
+        quiet: true,
+      });
+    }
+  },
+);
 export default config;

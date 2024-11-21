@@ -3,7 +3,7 @@ version: 2.1
 default_env: &default_env
   working_directory: ~/set-protocol-v2
   docker:
-    - image: circleci/node:14.18
+    - image: circleci/node:16.13.1
       environment:
           NODE_OPTIONS: --max_old_space_size=8192
 
@@ -68,6 +68,14 @@ jobs:
       - run:
           name: Hardhat Test
           command: yarn test:fork:arbitrum
+
+  test_integration_base:
+    <<: *default_env
+    steps:
+      - setup_job
+      - run:
+          name: Hardhat Test
+          command: yarn test:fork:base
 
   coverage:
     <<: *default_env
@@ -143,6 +151,9 @@ workflows:
           requires:
             - checkout_and_compile
       - test_integration_arbitrum:
+          requires:
+            - checkout_and_compile
+      - test_integration_base:
           requires:
             - checkout_and_compile
       - coverage:
