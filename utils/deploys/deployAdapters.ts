@@ -41,6 +41,7 @@ import {
 import { Address, Bytes } from "./../types";
 import {
   UniswapV3ExchangeAdapterV3,
+  AerodromeExchangeAdapter,
 } from "../../typechain";
 
 import { AaveGovernanceV2Adapter__factory } from "../../typechain/factories/AaveGovernanceV2Adapter__factory";
@@ -65,6 +66,7 @@ import { CompoundV3WrapV2Adapter__factory } from "../../typechain/factories/Comp
 import { YearnWrapV2Adapter__factory } from "../../typechain/factories/YearnWrapV2Adapter__factory";
 import { UniswapPairPriceAdapter__factory } from "../../typechain/factories/UniswapPairPriceAdapter__factory";
 import { UniswapV2ExchangeAdapter__factory } from "../../typechain/factories/UniswapV2ExchangeAdapter__factory";
+import { AerodromeExchangeAdapter__factory } from "../../typechain/factories/AerodromeExchangeAdapter__factory";
 import { UniswapV2AmmAdapter__factory } from "../../typechain/factories/UniswapV2AmmAdapter__factory";
 import { UniswapV2TransferFeeExchangeAdapter__factory } from "../../typechain/factories/UniswapV2TransferFeeExchangeAdapter__factory";
 import { UniswapV2ExchangeAdapterV2__factory } from "../../typechain/factories/UniswapV2ExchangeAdapterV2__factory";
@@ -108,6 +110,16 @@ export default class DeployAdapters {
 
   public async deployUniswapV2AmmAdapter(uniswapV2Router: Address): Promise<UniswapV2AmmAdapter> {
     return await new UniswapV2AmmAdapter__factory(this._deployerSigner).deploy(uniswapV2Router);
+  }
+
+  public async deployAerodromeExchangeAdapter(
+    aerodromeRouter: Address,
+    aerodromePoolFactory: Address,
+  ): Promise<AerodromeExchangeAdapter> {
+    return await new AerodromeExchangeAdapter__factory(this._deployerSigner).deploy(
+      aerodromeRouter,
+      aerodromePoolFactory,
+    );
   }
 
   public async deployUniswapV2ExchangeAdapter(

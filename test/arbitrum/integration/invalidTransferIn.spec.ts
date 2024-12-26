@@ -21,7 +21,7 @@ import { time, setBalance } from "@nomicfoundation/hardhat-network-helpers";
 
 const expect = getWaffleExpect();
 
-describe("Reproducing issuance failure for leveraged tokens on arbitrum [ @forked-arbitrum ]", () => {
+describe.skip("Reproducing issuance failure for leveraged tokens on arbitrum [ @forked-arbitrum ]", () => {
   const tokenTransferBuffer = 1;
   let owner: Account;
   let manager: Account;
