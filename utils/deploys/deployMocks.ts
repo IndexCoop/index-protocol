@@ -133,6 +133,8 @@ import { UnitConversionUtilsMock__factory } from "../../typechain/factories/Unit
 import { SetTokenAccessibleMock__factory } from "../../typechain/factories/SetTokenAccessibleMock__factory";
 import { WrappedfCashMock__factory } from "../../typechain/factories/WrappedfCashMock__factory";
 import { WrappedfCashFactoryMock__factory } from "../../typechain/factories/WrappedfCashFactoryMock__factory";
+import { ClaimAdapterMockV2 } from "../../typechain/ClaimAdapterMockV2";
+import { ClaimAdapterMockV2__factory } from "../../typechain/factories/ClaimAdapterMockV2__factory";
 
 export default class DeployMocks {
   private _deployerSigner: Signer;
@@ -437,6 +439,10 @@ export default class DeployMocks {
 
   public async deployClaimAdapterMock(): Promise<ClaimAdapterMock> {
     return await new ClaimAdapterMock__factory(this._deployerSigner).deploy();
+  }
+
+  public async deployClaimAdapterMockV2(): Promise<ClaimAdapterMockV2> {
+    return await new ClaimAdapterMockV2__factory(this._deployerSigner).deploy();
   }
 
   public async deployGaugeControllerMock(): Promise<GaugeControllerMock> {

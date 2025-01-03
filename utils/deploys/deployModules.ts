@@ -56,6 +56,8 @@ import { StreamingFeeModule__factory } from "../../typechain/factories/Streaming
 import { TradeModule__factory } from "../../typechain/factories/TradeModule__factory";
 import { WrapModule__factory } from "../../typechain/factories/WrapModule__factory";
 import { WrapModuleV2__factory } from "../../typechain/factories/WrapModuleV2__factory";
+import { ClaimModuleV2 } from "../../typechain/ClaimModuleV2";
+import { ClaimModuleV2__factory } from "../../typechain/factories/ClaimModuleV2__factory";
 
 export default class DeployModules {
   private _deployerSigner: Signer;
@@ -298,5 +300,9 @@ export default class DeployModules {
 
   public async deployAuctionRebalanceModuleV1(controller: Address): Promise<AuctionRebalanceModuleV1> {
     return await new AuctionRebalanceModuleV1__factory(this._deployerSigner).deploy(controller);
+  }
+
+  public async deployClaimModuleV2(controller: Address): Promise<ClaimModuleV2> {
+    return await new ClaimModuleV2__factory(this._deployerSigner).deploy(controller);
   }
 }

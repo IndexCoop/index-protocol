@@ -23,7 +23,9 @@ export { BytesArrayUtilsMock } from "../../typechain/BytesArrayUtilsMock";
 export { CachedSetValuer } from "../../typechain/CachedSetValuer";
 export { ChainlinkAggregatorMock } from "../../typechain/ChainlinkAggregatorMock";
 export { ClaimAdapterMock } from "../../typechain/ClaimAdapterMock";
+export { ClaimAdapterMockV2 } from "../../typechain/ClaimAdapterMockV2";
 export { ClaimModule } from "../../typechain/ClaimModule";
+export { ClaimModuleV2 } from "../../typechain/ClaimModuleV2";
 export { Compound } from "../../typechain/Compound";
 export { CompoundBravoGovernanceAdapter } from "../../typechain/CompoundBravoGovernanceAdapter";
 export { CompoundLikeGovernanceAdapter } from "../../typechain/CompoundLikeGovernanceAdapter";
@@ -74,6 +76,7 @@ export { ManagerIssuanceHookMock } from "../../typechain/ManagerIssuanceHookMock
 export { ModuleBaseMock } from "../../typechain/ModuleBaseMock";
 export { ModuleBaseV2Mock } from "../../typechain/ModuleBaseV2Mock";
 export { ModuleIssuanceHookMock } from "../../typechain/ModuleIssuanceHookMock";
+export { MorphoClaimV2Adapter } from "../../typechain/MorphoClaimV2Adapter";
 export { NAVIssuanceCaller } from "../../typechain/NAVIssuanceCaller";
 export { NAVIssuanceHookMock } from "../../typechain/NAVIssuanceHookMock";
 export { NotionalTradeModule } from "../../typechain/NotionalTradeModule";
