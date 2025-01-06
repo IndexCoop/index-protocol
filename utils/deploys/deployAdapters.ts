@@ -363,13 +363,7 @@ export default class DeployAdapters {
     return await new BoundedStepwiseExponentialPriceAdapter__factory(this._deployerSigner).deploy();
   }
 
-  public async deployMorphoClaimV2Adapter(
-    distributor: Address,
-    rewardToken: Address,
-  ): Promise<MorphoClaimV2Adapter> {
-    return await new MorphoClaimV2Adapter__factory(this._deployerSigner).deploy(
-      distributor,
-      rewardToken,
-    );
+  public async deployMorphoClaimV2Adapter(distributor: Address): Promise<MorphoClaimV2Adapter> {
+    return await new MorphoClaimV2Adapter__factory(this._deployerSigner).deploy(distributor);
   }
 }

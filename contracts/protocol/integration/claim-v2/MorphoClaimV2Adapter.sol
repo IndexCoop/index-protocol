@@ -34,18 +34,14 @@ contract MorphoClaimV2Adapter is IClaimV2Adapter {
 
     // Address of the Morpho Universal Rewards Distributor contract
     address public immutable distributor;
-    // Address of the reward token being distributed
-    IERC20 public immutable rewardToken;
 
     /* ============ Constructor ============ */
 
     /**
      * @param _distributor    Address of Morpho Universal Rewards Distributor
-     * @param _rewardToken    Address of reward token being distributed
      */
-    constructor(address _distributor, IERC20 _rewardToken) public {
+    constructor(address _distributor) public {
         distributor = _distributor;
-        rewardToken = _rewardToken;
     }
 
     /* ============ External Functions ============ */
@@ -55,6 +51,7 @@ contract MorphoClaimV2Adapter is IClaimV2Adapter {
      * Claim data can be obtained from: https://rewards.morpho.org/v1/users/{address}/distributions
      * 
      * @param _setToken     Set token address that will receive the rewards
+     * @param _rewardPool   Address of the reward token being claimed
      * @param _claimData    Raw claim data from Morpho API containing:
      *                      - claimable: Amount of rewards claimable
      *                      - proof: Merkle proof verifying the claim
@@ -65,7 +62,7 @@ contract MorphoClaimV2Adapter is IClaimV2Adapter {
      */
     function getClaimCallData(
         ISetToken _setToken,
-        address /* _rewardPool */,
+        address _rewardPool,
         bytes calldata _claimData
     )
         external
@@ -80,7 +77,7 @@ contract MorphoClaimV2Adapter is IClaimV2Adapter {
         bytes memory callData = abi.encodeWithSignature(
             "claim(address,address,uint256,bytes32[])",
             address(_setToken),    // account receiving rewards
-            address(rewardToken),  // reward token being claimed
+            _rewardPool,          // reward token being claimed
             claimable,            // amount of rewards to claim
             proof                 // merkle proof verifying the claim
         );
@@ -107,14 +104,16 @@ contract MorphoClaimV2Adapter is IClaimV2Adapter {
     }
 
     /**
-     * Returns the reward token address being distributed
+     * Returns the reward token address
+     * @param _rewardPool   Address of the reward token
+     * @return IERC20       The reward token address
      */
-    function getTokenAddress(address /* _rewardPool */)
+    function getTokenAddress(address _rewardPool)
         external
         view
         override
         returns (IERC20)
     {
-        return rewardToken;
+        return IERC20(_rewardPool);
     }
 }
