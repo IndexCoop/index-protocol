@@ -80,8 +80,6 @@ import { CompClaimAdapter__factory } from "../../typechain";
 import { RgtMigrationWrapAdapter__factory } from "../../typechain/factories/RgtMigrationWrapAdapter__factory";
 import { ERC4626WrapV2Adapter__factory } from "../../typechain/factories/ERC4626WrapV2Adapter__factory";
 import { ERC4626ExchangeAdapter__factory } from "../../typechain/factories/ERC4626ExchangeAdapter__factory";
-import { MorphoClaimV2Adapter } from "../../typechain/MorphoClaimV2Adapter";
-import { MorphoClaimV2Adapter__factory } from "../../typechain/factories/MorphoClaimV2Adapter__factory";
 
 export default class DeployAdapters {
   private _deployerSigner: Signer;
@@ -361,9 +359,5 @@ export default class DeployAdapters {
 
   public async deployBoundedStepwiseExponentialPriceAdapter(): Promise<BoundedStepwiseExponentialPriceAdapter> {
     return await new BoundedStepwiseExponentialPriceAdapter__factory(this._deployerSigner).deploy();
-  }
-
-  public async deployMorphoClaimV2Adapter(distributor: Address): Promise<MorphoClaimV2Adapter> {
-    return await new MorphoClaimV2Adapter__factory(this._deployerSigner).deploy(distributor);
   }
 }
