@@ -74,6 +74,7 @@ export { ManagerIssuanceHookMock } from "../../typechain/ManagerIssuanceHookMock
 export { ModuleBaseMock } from "../../typechain/ModuleBaseMock";
 export { ModuleBaseV2Mock } from "../../typechain/ModuleBaseV2Mock";
 export { ModuleIssuanceHookMock } from "../../typechain/ModuleIssuanceHookMock";
+export { MorphoMigrationWrapV2Adapter } from "../../typechain/MorphoMigrationWrapV2Adapter";
 export { NAVIssuanceCaller } from "../../typechain/NAVIssuanceCaller";
 export { NAVIssuanceHookMock } from "../../typechain/NAVIssuanceHookMock";
 export { NotionalTradeModule } from "../../typechain/NotionalTradeModule";
