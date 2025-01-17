@@ -74,8 +74,6 @@ describe("MorphoMigrationWrapV2Adapter", () => {
       subjectUnderlyingUnits = ether(2);
       subjectTo = await getRandomAddress();
       subjectWrapData = ZERO_BYTES;
-
-      await legacyMorphoToken.transfer(subjectTo, ether(10));
     });
 
     async function subject(): Promise<[string, BigNumber, string]> {
@@ -91,11 +89,9 @@ describe("MorphoMigrationWrapV2Adapter", () => {
     it("should return correct data for valid pair", async () => {
       const [targetAddress, ethValue, callData] = await subject();
 
-      const balance = await legacyMorphoToken.balanceOf(subjectTo);
-
       const expectedCallData = utils.defaultAbiCoder.encode(
         ["address", "uint256"],
-        [subjectTo, balance]
+        [subjectTo, subjectUnderlyingUnits]
       );
 
       expect(targetAddress).to.eq(morphoWrapper);

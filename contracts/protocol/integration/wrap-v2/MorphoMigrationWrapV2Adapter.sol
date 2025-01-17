@@ -50,6 +50,7 @@ contract MorphoMigrationWrapV2Adapter {
      *
      * @param _underlyingToken      Address of the legacy Morpho token
      * @param _wrappedToken         Address of the new Morpho token
+     * @param _underlyingUnits      Amount of underlying units to wrap
      * @param _to                   Address to send the new Morpho tokens to
      *
      * @return address              Target contract address
@@ -59,7 +60,7 @@ contract MorphoMigrationWrapV2Adapter {
     function getWrapCallData(
         address _underlyingToken,
         address _wrappedToken,
-        uint256 /* _underlyingUnits */,
+        uint256 _underlyingUnits,
         address _to,
         bytes memory /* _wrapData */
     )
@@ -70,12 +71,10 @@ contract MorphoMigrationWrapV2Adapter {
         require(_underlyingToken == legacyMorphoToken, "Must be a valid legacy Morpho token");
         require(_wrappedToken == newMorphoToken, "Must be a valid new Morpho token");
 
-        uint256 value = IERC20(legacyMorphoToken).balanceOf(_to);
-
         bytes memory callData = abi.encodeWithSignature(
             "depositFor(address,uint256)",
             address(_to),
-            value
+            _underlyingUnits
         );
 
         return (morphoWrapper, 0, callData);
