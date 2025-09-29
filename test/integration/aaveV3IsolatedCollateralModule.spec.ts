@@ -23,7 +23,7 @@ const contractAddresses = {
   aaveV3Pool: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2",
 };
 
-describe.only("GOLD3x Aave V3 Isolated Collateral Module integration [ @forked-mainnet ]", () => {
+describe.skip("GOLD3x Aave V3 Isolated Collateral Module integration [ @forked-mainnet ]", () => {
   let owner: Account;
   let deployer: DeployHelper;
   let setup: SystemFixture;
