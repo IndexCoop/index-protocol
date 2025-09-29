@@ -5,6 +5,7 @@ import {
   AirdropModule,
   AmmModule,
   AuctionRebalanceModuleV1,
+  AaveV3IsolatedCollateralModule,
   BasicIssuanceModule,
   ClaimModule,
   CompoundLeverageModule,
@@ -30,6 +31,7 @@ import { Address } from "../types";
 
 import { AaveLeverageModule__factory } from "../../typechain/factories/AaveLeverageModule__factory";
 import { AaveV3LeverageModule, AaveV3LeverageModule__factory } from "../../typechain";
+import { AaveV3IsolatedCollateralModule__factory } from "../../typechain/factories/AaveV3IsolatedCollateralModule__factory";
 import { MorphoLeverageModule, MorphoLeverageModule__factory } from "../../typechain";
 import { AirdropModule__factory } from "../../typechain/factories/AirdropModule__factory";
 import { AmmModule__factory } from "../../typechain/factories/AmmModule__factory";
@@ -304,5 +306,15 @@ export default class DeployModules {
 
   public async deployClaimModuleV2(controller: Address): Promise<ClaimModuleV2> {
     return await new ClaimModuleV2__factory(this._deployerSigner).deploy(controller);
+  }
+
+  public async deployAaveV3IsolatedCollateralModule(
+    controller: Address,
+    aaveV3Pool: Address,
+  ): Promise<AaveV3IsolatedCollateralModule> {
+    return await new AaveV3IsolatedCollateralModule__factory(this._deployerSigner).deploy(
+      controller,
+      aaveV3Pool,
+    );
   }
 }
