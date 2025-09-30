@@ -65,7 +65,6 @@ contract AaveV3IsolatedCollateralModule is ModuleBase {
         external
         onlyManagerAndValidSet(_setToken)
     {
-        require(_setToken.isComponent(_asset), "Must be component");
         bytes memory callData = abi.encodeWithSignature(
             "setUserUseReserveAsCollateral(address,bool)",
             _asset,
