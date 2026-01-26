@@ -98,6 +98,15 @@ const hardhatNetworks = {
   },
 };
 
+const polygonNetwork = process.env.POLYGON_DEPLOY_PRIVATE_KEY ? {
+  polygon: {
+    url: process.env.POLYGON_RPC_URL || "https://polygon-mainnet.g.alchemy.com/v2/Rr57Q41YGfkxYkx0kZp3EOQs86HatGGE",
+    accounts: [`0x${process.env.POLYGON_DEPLOY_PRIVATE_KEY}`],
+    chainId: 137,
+    gas: 6000000,
+  },
+} : {};
+
 const config: HardhatUserConfig = {
   solidity: {
     compilers: [
@@ -133,7 +142,8 @@ const config: HardhatUserConfig = {
       timeout: 200000,
       allowBlocksWithSameTimestamp: process.env.BLOCK_WITH_SAME_TIMESTAMP === "true",
     },
-    ...(process.env.KOVAN_DEPLOY_PRIVATE_KEY && hardhatNetworks),
+    ...(process.env.KOVAN_DEPLOY_PRIVATE_KEY ? hardhatNetworks : {}),
+    ...polygonNetwork,
   },
   // @ts-ignore
   typechain: {
