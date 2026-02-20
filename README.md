@@ -10,7 +10,7 @@ An overview of Index Protocol is available in our [Gitbook docs][11]
 ## Contracts
 This repo was originally forked from [Set Protocol v2](https://github.com/indexcoop/index-protocol) with permission from Set Labs. It is intended to house both original code (including most of this README) *and* new code that extends the protocol. Not all of the original contracts will be deployed as part of Index Protocol, and in time we will clean up unused code.
 
-[Set Protocol](https://setprotocol.com/) is a specification for tokenized asset management strategies on the ethereum blockchain written in the Solidity programming language. We use [Hardhat](https://hardhat.org/) as a development environment for compiling, testing, and deploying our contracts.
+[Set Protocol](https://setprotocol.com/) is a specification for tokenized asset management strategies on the Ethereum blockchain written in the Solidity programming language. We use [Hardhat](https://hardhat.org/) as a development environment for compiling, testing, and deploying our contracts.
 
 ## Development
 
@@ -54,7 +54,7 @@ npm install @indexcoop/index-protocol
 ```
 
 The distribution also comes with fixtures for mocking and testing SetProtocol's interactions with
-other protocols including Uniswap, Balancer, Compound (and many more.) To use these you'll need to install the peer dependencies listed in `package.json`.
+other protocols, including Uniswap, Balancer, Compound (and many more). To use these, you'll need to install the peer dependencies listed in `package.json`.
 
 #### Example Usage
 
@@ -86,7 +86,7 @@ We encourage participation from the community to help shape the development of I
 
 ## Security Audits
 
-Set Protocol V2 has undergone several audits. For more information see https://index-coop.gitbook.io/index-coop-community-handbook/protocols/security-and-audits
+Set Protocol V2 has undergone several audits. For more information, see https://index-coop.gitbook.io/index-coop-community-handbook/protocols/security-and-audits
 
 We have also audited recent changes  and additions to the protocol post-fork.
 
